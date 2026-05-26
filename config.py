@@ -15,6 +15,8 @@ except Exception:
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 RESULT_DIR = BASE_DIR / "results"
+PROCESSED_DIR = BASE_DIR / "processed"
+DEBUG_DIR = BASE_DIR / "debug"
 
 
 def _from_streamlit_secrets(name: str) -> Any | None:
@@ -54,3 +56,5 @@ def get_int_setting(name: str, default: int) -> int:
 def ensure_runtime_dirs() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    DEBUG_DIR.mkdir(parents=True, exist_ok=True)

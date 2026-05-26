@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
 
-from config import ensure_runtime_dirs
+from config import UPLOAD_DIR, ensure_runtime_dirs
+from image_processing import process_document_image
 from storage import list_results, load_result
 from task_queue import get_task_status, list_tasks, start_workers, submit_task
 
@@ -69,6 +71,79 @@ def _build_report(result: dict[str, Any]) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+def _save_processing_upload(uploaded_file: Any) -> str:
+    ensure_runtime_dirs()
+    suffix = Path(uploaded_file.name).suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+        suffix = ".png"
+
+    image_path = UPLOAD_DIR / f"processing_{uuid.uuid4()}{suffix}"
+    image_path.write_bytes(bytes(uploaded_file.getbuffer()))
+    return str(image_path)
+
+
+def _show_image_processing_page() -> None:
+    st.subheader("图片加工")
+    st.caption("自动检测文档边界，裁边拉正，并增强文字效果。")
+
+    uploaded_file = st.file_uploader(
+        "上传需要加工的作业图片",
+        type=["png", "jpg", "jpeg", "webp", "bmp"],
+        key="processing_uploader",
+    )
+    if not uploaded_file:
+        st.info("请先上传一张整页作业照片或扫描图片。")
+        return
+
+    original_path = _save_processing_upload(uploaded_file)
+    result = process_document_image(original_path)
+
+    status = result.get("status")
+    if status == "success":
+        st.success(result.get("message"))
+    elif status == "fallback":
+        st.warning(result.get("message"))
+    else:
+        st.error(result.get("message") or "图片处理失败。")
+        st.image(original_path, caption="原图", use_container_width=True)
+        return
+
+    columns = st.columns(3)
+    with columns[0]:
+        st.markdown("#### 原图")
+        st.image(original_path, use_container_width=True)
+
+    with columns[1]:
+        st.markdown("#### 透视校正")
+        warped_path = result.get("warped_path")
+        if warped_path and Path(warped_path).exists():
+            st.image(warped_path, use_container_width=True)
+
+    with columns[2]:
+        st.markdown("#### 文字增强")
+        enhanced_path = result.get("enhanced_path")
+        if enhanced_path and Path(enhanced_path).exists():
+            st.image(enhanced_path, use_container_width=True)
+
+    if result.get("corners"):
+        with st.expander("检测到的文档四角", expanded=False):
+            st.json(result["corners"])
+
+    debug_path = result.get("debug_path")
+    if debug_path and Path(debug_path).exists():
+        with st.expander("边界检测调试图", expanded=False):
+            st.image(debug_path, use_container_width=True)
+
+    enhanced_path = result.get("enhanced_path")
+    if enhanced_path and Path(enhanced_path).exists():
+        st.download_button(
+            "下载增强图",
+            data=Path(enhanced_path).read_bytes(),
+            file_name=Path(enhanced_path).name,
+            mime="image/png",
+        )
 
 
 def _task_rows() -> list[dict[str, Any]]:
@@ -180,7 +255,7 @@ def main() -> None:
 
     with st.sidebar:
         st.header("导航")
-        page = st.radio("页面", ["上传批改", "任务列表", "项目说明"], label_visibility="collapsed")
+        page = st.radio("页面", ["上传批改", "图片加工", "任务列表", "项目说明"], label_visibility="collapsed")
         if st.button("刷新状态", use_container_width=True):
             st.rerun()
 
@@ -198,6 +273,9 @@ def main() -> None:
         if selected_task_id:
             st.divider()
             _show_result(selected_task_id)
+
+    elif page == "图片加工":
+        _show_image_processing_page()
 
     elif page == "任务列表":
         rows = _task_rows()
