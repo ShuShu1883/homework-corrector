@@ -97,8 +97,20 @@ def _show_image_processing_page() -> None:
         st.info("请先上传一张整页作业照片或扫描图片。")
         return
 
+    mode_labels = {
+        "strong": "强力清晰",
+        "standard": "标准清晰",
+        "soft": "自然清晰",
+    }
+    selected_mode = st.segmented_control(
+        "增强模式",
+        options=list(mode_labels.keys()),
+        format_func=lambda item: mode_labels[item],
+        default="strong",
+    )
+
     original_path = _save_processing_upload(uploaded_file)
-    result = process_document_image(original_path)
+    result = process_document_image(original_path, enhance_mode=selected_mode or "strong")
 
     status = result.get("status")
     if status == "success":
@@ -122,7 +134,7 @@ def _show_image_processing_page() -> None:
             st.image(warped_path, use_container_width=True)
 
     with columns[2]:
-        st.markdown("#### 文字增强")
+        st.markdown(f"#### {mode_labels.get(result.get('enhance_mode'), '清晰图')}")
         enhanced_path = result.get("enhanced_path")
         if enhanced_path and Path(enhanced_path).exists():
             st.image(enhanced_path, use_container_width=True)
@@ -139,11 +151,12 @@ def _show_image_processing_page() -> None:
     enhanced_path = result.get("enhanced_path")
     if enhanced_path and Path(enhanced_path).exists():
         st.download_button(
-            "下载增强图",
+            "下载清晰增强图",
             data=Path(enhanced_path).read_bytes(),
             file_name=Path(enhanced_path).name,
             mime="image/png",
         )
+
 
 
 def _task_rows() -> list[dict[str, Any]]:
