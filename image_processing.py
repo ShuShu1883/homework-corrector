@@ -36,14 +36,14 @@ ENHANCE_PRESETS = {
         "paper_brightening": 1.04,
     },
     "strong": {
-        "clip_limit": 4.0,
-        "sharpen_amount": 1.8,
+        "clip_limit": 2.4,
+        "sharpen_amount": 1.1,
         "denoise": 0,
         "normalize_background": True,
-        "background_sigma": 45,
-        "gamma": 0.72,
-        "text_darkening": 0.62,
-        "paper_brightening": 1.14,
+        "background_sigma": 35,
+        "gamma": 0.9,
+        "text_darkening": 0.75,
+        "paper_brightening": 1.06,
     },
 }
 
@@ -68,6 +68,55 @@ def _upscale_for_text(image: np.ndarray) -> np.ndarray:
     scale = min(MIN_TEXT_SIDE / longest, 2.0)
     new_size = (int(width * scale), int(height * scale))
     return cv2.resize(image, new_size, interpolation=cv2.INTER_CUBIC)
+
+
+def _largest_true_run(mask: np.ndarray) -> tuple[int, int] | None:
+    indexes = np.where(mask)[0]
+    if len(indexes) == 0:
+        return None
+
+    best_start = int(indexes[0])
+    best_end = int(indexes[0])
+    current_start = int(indexes[0])
+    current_end = int(indexes[0])
+
+    for index in indexes[1:]:
+        index = int(index)
+        if index == current_end + 1:
+            current_end = index
+            continue
+
+        if (current_end - current_start) > (best_end - best_start):
+            best_start, best_end = current_start, current_end
+        current_start = current_end = index
+
+    if (current_end - current_start) > (best_end - best_start):
+        best_start, best_end = current_start, current_end
+    return best_start, best_end
+
+
+def _crop_black_borders(image: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    bright = gray > 18
+    row_ratio = bright.mean(axis=1)
+    col_ratio = bright.mean(axis=0)
+
+    row_run = _largest_true_run(row_ratio > 0.08)
+    col_run = _largest_true_run(col_ratio > 0.08)
+    if row_run is None or col_run is None:
+        return image
+
+    top, bottom = row_run
+    left, right = col_run
+    if (bottom - top) < image.shape[0] * 0.25 or (right - left) < image.shape[1] * 0.25:
+        return image
+
+    pad = max(2, int(min(image.shape[:2]) * 0.005))
+    top = max(0, top - pad)
+    bottom = min(image.shape[0] - 1, bottom + pad)
+    left = max(0, left - pad)
+    right = min(image.shape[1] - 1, right + pad)
+    return image[top : bottom + 1, left : right + 1]
 
 
 def _load_rgb_image(image_path: str) -> np.ndarray:
@@ -115,6 +164,196 @@ def order_points(points: np.ndarray) -> np.ndarray:
     return ordered
 
 
+def _scale_points(points: np.ndarray, scale_x: float, scale_y: float) -> np.ndarray:
+    scaled = points.reshape(4, 2).astype("float32")
+    scaled[:, 0] *= scale_x
+    scaled[:, 1] *= scale_y
+    return order_points(scaled)
+
+
+def _valid_document_box(box: np.ndarray, image_width: int, image_height: int) -> bool:
+    rect = order_points(box)
+    top_left, top_right, bottom_right, bottom_left = rect
+    width = max(np.linalg.norm(top_right - top_left), np.linalg.norm(bottom_right - bottom_left))
+    height = max(np.linalg.norm(bottom_left - top_left), np.linalg.norm(bottom_right - top_right))
+    if width < 1 or height < 1:
+        return False
+
+    image_area = image_width * image_height
+    box_area = cv2.contourArea(rect.astype("float32"))
+    if box_area < image_area * 0.20:
+        return False
+
+    aspect = max(width, height) / min(width, height)
+    if aspect > 3.2:
+        return False
+
+    center = rect.mean(axis=0)
+    if not (0 <= center[0] <= image_width and 0 <= center[1] <= image_height):
+        return False
+
+    return True
+
+
+def _box_nearly_full_frame(box: np.ndarray, image_width: int, image_height: int) -> bool:
+    rect = order_points(box)
+    min_x = float(np.min(rect[:, 0]))
+    max_x = float(np.max(rect[:, 0]))
+    min_y = float(np.min(rect[:, 1]))
+    max_y = float(np.max(rect[:, 1]))
+    width_ratio = (max_x - min_x) / max(image_width, 1)
+    height_ratio = (max_y - min_y) / max(image_height, 1)
+    return width_ratio > 0.94 and height_ratio > 0.94
+
+
+def _detect_corners_by_paper_mask(image: np.ndarray) -> np.ndarray | None:
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    saturation = hsv[:, :, 1]
+    luminance = lab[:, :, 0]
+
+    kernel_size = max(17, int(max(height, width) * 0.025))
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+
+    threshold_pairs = (
+        (145, 90),
+        (135, 85),
+        (125, 100),
+        (115, 110),
+    )
+    best_box = None
+    best_area = 0.0
+
+    for light_threshold, saturation_threshold in threshold_pairs:
+        mask = ((luminance > light_threshold) & (saturation < saturation_threshold)).astype("uint8") * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < height * width * 0.15:
+                continue
+
+            box = cv2.boxPoints(cv2.minAreaRect(contour)).astype("float32")
+            box[:, 0] = np.clip(box[:, 0], 0, width - 1)
+            box[:, 1] = np.clip(box[:, 1], 0, height - 1)
+            if not _valid_document_box(box, width, height):
+                continue
+
+            box_area = cv2.contourArea(order_points(box))
+            if box_area > best_area:
+                best_area = box_area
+                best_box = box
+
+    if best_box is None:
+        return None
+    return order_points(best_box)
+
+
+def _fit_x_at_y(lines: list[tuple[int, int, int, int]], y: float) -> float:
+    points = []
+    for x1, y1, x2, y2 in lines:
+        points.append((float(y1), float(x1)))
+        points.append((float(y2), float(x2)))
+    ys = np.array([point[0] for point in points], dtype=np.float32)
+    xs = np.array([point[1] for point in points], dtype=np.float32)
+    if np.ptp(ys) < 1:
+        return float(np.median(xs))
+    slope, intercept = np.polyfit(ys, xs, 1)
+    return float(slope * y + intercept)
+
+
+def _detect_corners_by_page_lines(image: np.ndarray) -> np.ndarray | None:
+    height, width = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(gray, 40, 120)
+
+    min_line_length = max(120, int(height * 0.24))
+    lines = cv2.HoughLinesP(
+        edged,
+        1,
+        np.pi / 180,
+        threshold=max(70, int(width * 0.10)),
+        minLineLength=min_line_length,
+        maxLineGap=max(18, int(height * 0.035)),
+    )
+    if lines is None:
+        return None
+
+    vertical_lines: list[tuple[int, int, int, int]] = []
+    for x1, y1, x2, y2 in lines[:, 0]:
+        dx = float(x2 - x1)
+        dy = float(y2 - y1)
+        angle = abs(np.degrees(np.arctan2(dy, dx)))
+        length = float(np.hypot(dx, dy))
+        if angle < 78 or length < min_line_length:
+            continue
+        vertical_lines.append((int(x1), int(y1), int(x2), int(y2)))
+
+    if len(vertical_lines) < 2:
+        return None
+
+    groups: list[dict[str, Any]] = []
+    group_tolerance = max(12, int(width * 0.035))
+    for line in sorted(vertical_lines, key=lambda item: (item[0] + item[2]) / 2):
+        x_mid = (line[0] + line[2]) / 2
+        for group in groups:
+            if abs(x_mid - group["x"]) <= group_tolerance:
+                group["lines"].append(line)
+                all_x = [((ln[0] + ln[2]) / 2) for ln in group["lines"]]
+                group["x"] = float(np.median(all_x))
+                break
+        else:
+            groups.append({"x": float(x_mid), "lines": [line]})
+
+    best_pair = None
+    best_score = 0.0
+    for left_index, left_group in enumerate(groups):
+        for right_group in groups[left_index + 1 :]:
+            left_x = float(left_group["x"])
+            right_x = float(right_group["x"])
+            pair_width = right_x - left_x
+            if pair_width < width * 0.45 or pair_width > width * 0.95:
+                continue
+            if left_x > width * 0.55 or right_x < width * 0.45:
+                continue
+
+            line_count = len(left_group["lines"]) + len(right_group["lines"])
+            score = pair_width * (1 + line_count * 0.15)
+            if score > best_score:
+                best_score = score
+                best_pair = (left_group["lines"], right_group["lines"])
+
+    if best_pair is None:
+        return None
+
+    left_lines, right_lines = best_pair
+    top_y = 0.0
+    bottom_y = float(height - 1)
+    left_top = np.clip(_fit_x_at_y(left_lines, top_y), 0, width - 1)
+    left_bottom = np.clip(_fit_x_at_y(left_lines, bottom_y), 0, width - 1)
+    right_top = np.clip(_fit_x_at_y(right_lines, top_y), 0, width - 1)
+    right_bottom = np.clip(_fit_x_at_y(right_lines, bottom_y), 0, width - 1)
+
+    points = np.array(
+        [
+            [left_top, top_y],
+            [right_top, top_y],
+            [right_bottom, bottom_y],
+            [left_bottom, bottom_y],
+        ],
+        dtype="float32",
+    )
+    if not _valid_document_box(points, width, height):
+        return None
+    return order_points(points)
+
+
 def detect_document_corners(image: np.ndarray) -> np.ndarray | None:
     original_height, original_width = image.shape[:2]
     detection_image = _resize_to_max_side(image, MAX_DETECT_SIDE)
@@ -143,11 +382,20 @@ def detect_document_corners(image: np.ndarray) -> np.ndarray | None:
         approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
         if len(approx) == 4:
             points = approx.reshape(4, 2).astype("float32")
-            points[:, 0] *= scale_x
-            points[:, 1] *= scale_y
-            return order_points(points)
+            if _valid_document_box(points, detect_width, detect_height):
+                return _scale_points(points, scale_x, scale_y)
 
-    return None
+    mask_points = _detect_corners_by_paper_mask(detection_image)
+    if mask_points is not None and not _box_nearly_full_frame(mask_points, detect_width, detect_height):
+        return _scale_points(mask_points, scale_x, scale_y)
+
+    line_points = _detect_corners_by_page_lines(detection_image)
+    if line_points is not None:
+        return _scale_points(line_points, scale_x, scale_y)
+
+    if mask_points is None:
+        return None
+    return _scale_points(mask_points, scale_x, scale_y)
 
 
 def four_point_transform(image: np.ndarray, points: np.ndarray) -> np.ndarray:
@@ -238,7 +486,7 @@ def process_document_image(image_path: str, task_id: str | None = None, enhance_
     task_id = task_id or str(uuid.uuid4())
 
     try:
-        original = _load_rgb_image(image_path)
+        original = _crop_black_borders(_load_rgb_image(image_path))
         working = _resize_to_max_side(original, MAX_OUTPUT_SIDE)
         corners = detect_document_corners(working)
 

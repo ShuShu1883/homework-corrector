@@ -8,6 +8,7 @@ import streamlit as st
 
 from config import UPLOAD_DIR, ensure_runtime_dirs
 from image_processing import process_document_image
+from paper_cut_aliyun import SUBJECT_OPTIONS, recognize_edu_paper_cut
 from storage import list_results, load_result
 from task_queue import get_task_status, list_tasks, start_workers, submit_task
 
@@ -158,6 +159,122 @@ def _show_image_processing_page() -> None:
         )
 
 
+def _json_dumps_for_download(payload: dict[str, Any]) -> bytes:
+    import json
+
+    slim_payload = {key: value for key, value in payload.items() if key != "raw"}
+    return json.dumps(slim_payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def _show_paper_cut_page() -> None:
+    st.subheader("试卷切题")
+    st.caption("调用阿里云 RecognizeEduPaperCut，将整页试卷切成题目并返回文字和坐标。")
+
+    uploaded_file = st.file_uploader(
+        "上传整页试卷图片",
+        type=["png", "jpg", "jpeg", "webp", "bmp"],
+        key="paper_cut_uploader",
+    )
+    if not uploaded_file:
+        st.info("请上传一张练习册、试卷或教辅整页图片。")
+        return
+
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        image_type = st.segmented_control(
+            "图片类型",
+            options=["photo", "scan"],
+            format_func=lambda item: "实拍图" if item == "photo" else "扫描图",
+            default="photo",
+        )
+    with col_b:
+        cut_type = st.segmented_control(
+            "切题类型",
+            options=["question", "answer"],
+            format_func=lambda item: "题目" if item == "question" else "答案",
+            default="question",
+        )
+    with col_c:
+        subject = st.selectbox(
+            "学科",
+            options=list(SUBJECT_OPTIONS.keys()),
+            format_func=lambda item: SUBJECT_OPTIONS[item],
+            index=0,
+        )
+
+    if st.button("调用阿里云切题", type="primary"):
+        original_path = _save_processing_upload(uploaded_file)
+
+        with st.spinner("正在调用阿里云试卷切题识别..."):
+            try:
+                result = recognize_edu_paper_cut(
+                    original_path,
+                    cut_type=cut_type or "question",
+                    image_type=image_type or "photo",
+                    subject=subject or "default",
+                    output_oricoord=True,
+                )
+            except Exception as exc:
+                st.error(str(exc))
+                return
+
+        if result.get("question_count", 0) == 0:
+            st.warning("阿里云未识别到题目区域，已保留原始返回结果。")
+
+        st.success(f"切题完成，共识别 {result['question_count']} 个题目区域。")
+        st.session_state["paper_cut_result"] = result
+        st.session_state["paper_cut_original_path"] = original_path
+        st.session_state.pop("paper_cut_processed", None)
+
+    result = st.session_state.get("paper_cut_result")
+    if not result:
+        st.image(uploaded_file, caption="待切题试卷", use_container_width=True)
+        return
+
+    original_path = st.session_state.get("paper_cut_original_path")
+    preview_cols = st.columns(2)
+    with preview_cols[0]:
+        st.markdown("#### 原图")
+        if original_path and Path(original_path).exists():
+            st.image(original_path, use_container_width=True)
+    with preview_cols[1]:
+        st.markdown("#### 实际送检图")
+        image_path = result.get("image_path")
+        if image_path and Path(image_path).exists():
+            st.image(image_path, use_container_width=True)
+
+    st.markdown("#### 切题结果")
+    st.caption(f"RequestId: {result.get('request_id') or '-'}")
+
+    for item in result.get("questions", []):
+        title_text = item.get("text") or "无文字"
+        title = f"第 {item.get('question_no', item.get('subject_index'))} 题 · {title_text[:36]}"
+        with st.expander(title, expanded=False):
+            crop_path = item.get("crop_path")
+            if crop_path and Path(crop_path).exists():
+                st.image(crop_path, caption="题目区域", use_container_width=True)
+            st.text_area(
+                "识别文字",
+                item.get("text", ""),
+                height=120,
+                key=f"paper_cut_text_{item.get('page_index')}_{item.get('subject_index')}",
+            )
+            st.json(
+                {
+                    "ids": item.get("ids"),
+                    "bbox": item.get("bbox"),
+                    "is_multipage": item.get("is_multipage"),
+                }
+            )
+
+    st.download_button(
+        "下载切题 JSON",
+        data=_json_dumps_for_download(result),
+        file_name=f"paper_cut_{result.get('task_id')}.json",
+        mime="application/json",
+    )
+
+
 
 def _task_rows() -> list[dict[str, Any]]:
     rows = []
@@ -268,7 +385,7 @@ def main() -> None:
 
     with st.sidebar:
         st.header("导航")
-        page = st.radio("页面", ["上传批改", "图片加工", "任务列表", "项目说明"], label_visibility="collapsed")
+        page = st.radio("页面", ["上传批改", "图片加工", "试卷切题", "任务列表", "项目说明"], label_visibility="collapsed")
         if st.button("刷新状态", use_container_width=True):
             st.rerun()
 
@@ -289,6 +406,9 @@ def main() -> None:
 
     elif page == "图片加工":
         _show_image_processing_page()
+
+    elif page == "试卷切题":
+        _show_paper_cut_page()
 
     elif page == "任务列表":
         rows = _task_rows()

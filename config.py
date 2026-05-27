@@ -4,19 +4,19 @@ import os
 from pathlib import Path
 from typing import Any
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except Exception:
-    pass
-
-
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 RESULT_DIR = BASE_DIR / "results"
 PROCESSED_DIR = BASE_DIR / "processed"
 DEBUG_DIR = BASE_DIR / "debug"
+CUT_DIR = BASE_DIR / "cuts"
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(BASE_DIR / ".env")
+except Exception:
+    pass
 
 
 def _from_streamlit_secrets(name: str) -> Any | None:
@@ -58,3 +58,4 @@ def ensure_runtime_dirs() -> None:
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+    CUT_DIR.mkdir(parents=True, exist_ok=True)

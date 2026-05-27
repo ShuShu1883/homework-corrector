@@ -23,6 +23,7 @@
 - `task_queue.py`：任务队列、任务状态管理、后台 worker 启动控制。
 - `worker.py`：单个作业任务的完整处理流程。
 - `image_processing.py`：文档图片加工模块，负责文档边界检测、透视校正和文字增强。
+- `paper_cut_aliyun.py`：阿里云试卷切题模块，调用 `RecognizeEduPaperCut` 并按返回坐标裁出题目小图。
 - `ocr_aliyun.py`：阿里云 OCR 调用封装，对外只暴露 `recognize_homework`。
 - `llm_corrector.py`：大模型批改封装，对外只暴露 `correct_homework`。
 - `storage.py`：批改结果 JSON 保存和读取。
@@ -40,6 +41,12 @@
 系统新增独立的图片加工页面，用于模拟手机文档模式或扫描软件的基础能力。用户上传整页作业照片后，系统会使用 OpenCV 检测纸张四角，裁剪背景并进行透视校正，然后生成保留颜色信息的清晰增强图。增强主要处理亮度通道，用于减弱阴影、提升对比度和轻度锐化。
 
 如果系统无法稳定检测到文档四角，会自动退化为整图文字增强，避免因为图片边界不明显导致流程中断。后续接入 OCR 主流程时，可优先使用清晰增强图作为 OCR 输入。
+
+## 试卷切题模块
+
+系统新增独立的试卷切题页面，用于调用阿里云 `RecognizeEduPaperCut` 接口。用户上传整页试卷图片后，可选择实拍图或扫描图、题目或答案切分、学科类型。接口返回后，系统展示每道题的识别文字、坐标信息，并根据坐标裁出题目区域小图，方便后续接入逐题批改。
+
+阿里云 AccessKey 只通过 `.env` 或 Streamlit Secrets 读取，不写入源码或提交到 GitHub。
 
 ## 本地运行
 
@@ -71,6 +78,9 @@ streamlit run app.py
 OCR_MODE=aliyun
 ALIYUN_OCR_ENDPOINT=你的阿里云OCR接口地址
 ALIYUN_OCR_APPCODE=你的APPCODE
+ALIYUN_ACCESS_KEY_ID=你的AccessKey ID
+ALIYUN_ACCESS_KEY_SECRET=你的AccessKey Secret
+ALIYUN_PAPER_CUT_ENDPOINT=ocr-api.cn-hangzhou.aliyuncs.com
 ```
 
 大模型 API 采用 OpenAI-compatible 格式：

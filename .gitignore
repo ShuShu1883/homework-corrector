@@ -8,7 +8,9 @@ uploads/*
 results/*
 processed/*
 debug/*
+cuts/*
 !uploads/.gitkeep
 !results/.gitkeep
 !processed/.gitkeep
 !debug/.gitkeep
+!cuts/.gitkeep
