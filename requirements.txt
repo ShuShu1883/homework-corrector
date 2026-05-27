@@ -6,3 +6,5 @@ opencv-python-headless>=4.9
 alibabacloud_ocr_api20210707>=3.1
 alibabacloud_tea_openapi>=0.4
 alibabacloud_tea_util>=0.3
+tencentcloud-sdk-python-common>=3.0
+tencentcloud-sdk-python-ocr>=3.0

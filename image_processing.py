@@ -13,6 +13,7 @@ from config import DEBUG_DIR, PROCESSED_DIR, ensure_runtime_dirs
 
 MAX_DETECT_SIDE = 1000
 MAX_OUTPUT_SIDE = 2200
+MAX_PREVIEW_SIDE = 1100
 MIN_TEXT_SIDE = 1600
 ENHANCE_PRESETS = {
     "soft": {
@@ -148,6 +149,24 @@ def _save_rgb_image(path: Path, image: np.ndarray) -> str:
     else:
         Image.fromarray(image.astype(np.uint8), mode="RGB").save(path)
     return str(path)
+
+
+def create_preview_image(image_path: str, task_id: str | None = None, suffix: str = "preview") -> str:
+    ensure_runtime_dirs()
+    task_id = task_id or str(uuid.uuid4())
+
+    image = ImageOps.exif_transpose(Image.open(image_path)).convert("RGB")
+    longest = max(image.size)
+    if longest > MAX_PREVIEW_SIDE:
+        scale = MAX_PREVIEW_SIDE / longest
+        image = image.resize(
+            (max(1, int(image.size[0] * scale)), max(1, int(image.size[1] * scale))),
+            Image.Resampling.LANCZOS,
+        )
+
+    preview_path = PROCESSED_DIR / f"{task_id}_{suffix}.jpg"
+    image.save(preview_path, format="JPEG", quality=82, optimize=True)
+    return str(preview_path)
 
 
 def order_points(points: np.ndarray) -> np.ndarray:

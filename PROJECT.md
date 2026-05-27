@@ -10,12 +10,12 @@
 
 - 前端界面：Streamlit
 - 后台任务：Python `queue.Queue` + 后台线程池
-- OCR 模块：阿里云 OCR HTTP 适配器
+- OCR 模块：腾讯云试卷切题 OCR + 阿里云 OCR HTTP 适配器
 - 智能批改：OpenAI-compatible Chat Completions API
 - 数据存储：本地 JSON 文件
 - 文件存储：本地 `uploads/` 目录
 
-系统采用生产者-消费者模型。用户上传图片后，前端立即生成任务 ID 并将任务放入队列。后台 worker 线程从队列中取出任务，依次执行 OCR 识别、大模型批改和结果保存。前端通过任务 ID 查询任务状态。
+系统采用生产者-消费者模型。用户上传图片后，前端立即生成任务 ID 并将任务放入队列。后台 worker 线程从队列中取出任务，依次执行腾讯云切题 OCR、大模型批改和结果保存。前端通过任务 ID 查询任务状态。
 
 ## 模块划分
 
@@ -23,8 +23,9 @@
 - `task_queue.py`：任务队列、任务状态管理、后台 worker 启动控制。
 - `worker.py`：单个作业任务的完整处理流程。
 - `image_processing.py`：文档图片加工模块，负责文档边界检测、透视校正和文字增强。
-- `paper_cut_aliyun.py`：阿里云试卷切题模块，调用 `RecognizeEduPaperCut` 并按返回坐标裁出题目小图。
-- `ocr_aliyun.py`：阿里云 OCR 调用封装，对外只暴露 `recognize_homework`。
+- `paper_cut_tencent.py`：腾讯云试卷切题 OCR 模块，调用 `QuestionSplitOCR` 并按返回坐标裁出题目小图。
+- `paper_cut_aliyun.py`：旧版阿里云试卷切题模块，保留作参考和兼容。
+- `ocr_aliyun.py`：阿里云 OCR 调用封装，保留普通 OCR 适配能力。
 - `llm_corrector.py`：大模型批改封装，对外只暴露 `correct_homework`。
 - `storage.py`：批改结果 JSON 保存和读取。
 - `config.py`：环境变量、`.env`、Streamlit Secrets 配置读取。
@@ -44,9 +45,9 @@
 
 ## 试卷切题模块
 
-系统新增独立的试卷切题页面，用于调用阿里云 `RecognizeEduPaperCut` 接口。用户上传整页试卷图片后，可选择实拍图或扫描图、题目或答案切分、学科类型。接口返回后，系统展示每道题的识别文字、坐标信息，并根据坐标裁出题目区域小图，方便后续接入逐题批改。
+系统新增独立的试卷切题页面，用于调用腾讯云 `QuestionSplitOCR` 接口。用户上传整页试卷图片后，可选择是否使用新模型以及是否开启切边增强/弯曲矫正。接口返回后，系统展示每道题的识别文字、坐标信息，并根据坐标裁出题目区域小图。上传批改主流程也会优先使用该切题 OCR 结果进入逐题批改。
 
-阿里云 AccessKey 只通过 `.env` 或 Streamlit Secrets 读取，不写入源码或提交到 GitHub。
+腾讯云 SecretId/SecretKey 只通过 `.env` 或 Streamlit Secrets 读取，不写入源码或提交到 GitHub。
 
 ## 本地运行
 
@@ -59,7 +60,9 @@ pip install -r requirements.txt
 2. 创建 `.env`：
 
 ```text
-OCR_MODE=mock
+TENCENT_SECRET_ID=你的腾讯云SecretId
+TENCENT_SECRET_KEY=你的腾讯云SecretKey
+TENCENT_OCR_REGION=ap-guangzhou
 LLM_MODE=mock
 MAX_WORKERS=3
 ```
@@ -75,12 +78,9 @@ streamlit run app.py
 真实 OCR 模式需要配置：
 
 ```text
-OCR_MODE=aliyun
-ALIYUN_OCR_ENDPOINT=你的阿里云OCR接口地址
-ALIYUN_OCR_APPCODE=你的APPCODE
-ALIYUN_ACCESS_KEY_ID=你的AccessKey ID
-ALIYUN_ACCESS_KEY_SECRET=你的AccessKey Secret
-ALIYUN_PAPER_CUT_ENDPOINT=ocr-api.cn-hangzhou.aliyuncs.com
+TENCENT_SECRET_ID=你的腾讯云SecretId
+TENCENT_SECRET_KEY=你的腾讯云SecretKey
+TENCENT_OCR_REGION=ap-guangzhou
 ```
 
 大模型 API 采用 OpenAI-compatible 格式：
@@ -96,7 +96,7 @@ LLM_MODEL=gpt-4o-mini
 
 ## 报告可用表述
 
-本系统采用异步任务处理机制。用户上传作业后，系统不会同步等待 OCR 和大模型批改完成，而是立即生成任务 ID，并将任务加入内存消息队列。后台线程池从队列中取出任务并并发处理 OCR 识别、智能批改和结果保存。前端通过任务 ID 查询任务状态，实现 waiting、running、finished、failed 等状态展示。
+本系统采用异步任务处理机制。用户上传作业后，系统不会同步等待切题 OCR 和大模型批改完成，而是立即生成任务 ID，并将任务加入内存消息队列。后台线程池从队列中取出任务并并发处理腾讯云切题 OCR、智能批改和结果保存。前端通过任务 ID 查询任务状态，实现 waiting、running、finished、failed 等状态展示。
 
 当前实现适用于单机小规模并发场景。若部署到生产环境，可将内存队列升级为 Redis/Celery，将文件存储迁移至对象存储，将任务结果保存到数据库中，从而支持多进程、多节点和更高并发。
 
