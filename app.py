@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import hashlib
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,12 @@ def _uploaded_preview(uploaded_file: Any, max_side: int = 1100) -> Image.Image:
             Image.Resampling.LANCZOS,
         )
     return image
+
+
+def _uploaded_file_signature(uploaded_file: Any) -> str:
+    data = bytes(uploaded_file.getbuffer())
+    digest = hashlib.blake2b(data, digest_size=8).hexdigest()
+    return f"{uploaded_file.name}:{uploaded_file.size}:{digest}"
 
 
 def _correct_rate(questions: list[dict[str, Any]]) -> str:
@@ -204,6 +211,13 @@ def _show_paper_cut_page() -> None:
     if not uploaded_file:
         st.info("请上传一张练习册、试卷或教辅整页图片。")
         return
+
+    file_signature = _uploaded_file_signature(uploaded_file)
+    if st.session_state.get("paper_cut_file_signature") != file_signature:
+        st.session_state["paper_cut_file_signature"] = file_signature
+        st.session_state.pop("paper_cut_result", None)
+        st.session_state.pop("paper_cut_original_path", None)
+        st.session_state.pop("paper_cut_processed", None)
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -443,8 +457,17 @@ def main() -> None:
             st.rerun()
 
     if page == "上传批改":
-        uploaded_file = st.file_uploader("上传作业图片", type=["png", "jpg", "jpeg", "webp", "bmp"])
+        uploaded_file = st.file_uploader(
+            "上传作业图片",
+            type=["png", "jpg", "jpeg", "webp", "bmp"],
+            key="correction_uploader",
+        )
         if uploaded_file:
+            file_signature = _uploaded_file_signature(uploaded_file)
+            if st.session_state.get("correction_file_signature") != file_signature:
+                st.session_state["correction_file_signature"] = file_signature
+                st.session_state.pop("selected_task_id", None)
+
             st.image(_uploaded_preview(uploaded_file), caption="待批改作业", use_container_width=True)
 
         if st.button("提交批改任务", type="primary", disabled=uploaded_file is None):
