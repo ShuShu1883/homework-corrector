@@ -13,9 +13,9 @@
 - OCR 模块：腾讯云试卷切题 OCR + 阿里云 OCR HTTP 适配器
 - 智能批改：OpenAI-compatible Chat Completions API
 - 数据存储：本地 JSON 文件
-- 文件存储：本地 `uploads/` 目录
+- 文件存储：项目运行目录下的 `uploads/`、`processed/`、`cuts/`、`debug/`、`results/` 目录，可通过 `APP_RUNTIME_DIR` 改到部署环境可写目录。
 
-系统采用生产者-消费者模型。用户上传图片后，前端立即生成任务 ID 并将任务放入队列。后台 worker 线程从队列中取出任务，依次执行腾讯云切题 OCR、大模型批改和结果保存。前端通过任务 ID 查询任务状态。
+系统采用生产者-消费者模型。用户上传图片后，前端立即生成任务 ID 并将任务放入队列。后台 worker 线程从队列中取出任务，依次执行腾讯云切题 OCR、大模型批改和结果保存。前端通过任务 ID 查询任务状态。为适配 Streamlit Cloud 这类临时磁盘环境，应用启动时会清理过期临时图片；提交批改或手动切题前会清空上一轮临时图片产物，避免 `uploads/`、`processed/`、`cuts/`、`debug/` 等目录持续堆积，`results/` 会保留。
 
 ## 模块划分
 
@@ -24,7 +24,6 @@
 - `worker.py`：单个作业任务的完整处理流程。
 - `image_processing.py`：文档图片加工模块，负责文档边界检测、透视校正和文字增强。
 - `paper_cut_tencent.py`：腾讯云试卷切题 OCR 模块，调用 `QuestionSplitOCR` 并按返回坐标裁出题目小图。
-- `paper_cut_aliyun.py`：旧版阿里云试卷切题模块，保留作参考和兼容。
 - `ocr_aliyun.py`：阿里云 OCR 调用封装，保留普通 OCR 适配能力。
 - `llm_corrector.py`：大模型批改封装，对外只暴露 `correct_homework`。
 - `storage.py`：批改结果 JSON 保存和读取。

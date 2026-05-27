@@ -5,11 +5,6 @@ from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-RESULT_DIR = BASE_DIR / "results"
-PROCESSED_DIR = BASE_DIR / "processed"
-DEBUG_DIR = BASE_DIR / "debug"
-CUT_DIR = BASE_DIR / "cuts"
 
 try:
     from dotenv import load_dotenv
@@ -17,6 +12,13 @@ try:
     load_dotenv(BASE_DIR / ".env")
 except Exception:
     pass
+
+RUNTIME_DIR = Path(os.getenv("APP_RUNTIME_DIR", BASE_DIR)).resolve()
+UPLOAD_DIR = RUNTIME_DIR / "uploads"
+RESULT_DIR = RUNTIME_DIR / "results"
+PROCESSED_DIR = RUNTIME_DIR / "processed"
+DEBUG_DIR = RUNTIME_DIR / "debug"
+CUT_DIR = RUNTIME_DIR / "cuts"
 
 
 def _from_streamlit_secrets(name: str) -> Any | None:

@@ -12,6 +12,7 @@ import streamlit as st
 from config import UPLOAD_DIR, ensure_runtime_dirs
 from image_processing import create_preview_image, process_document_image
 from paper_cut_tencent import recognize_question_split
+from runtime_cleanup import cleanup_runtime_files, clear_runtime_files
 from storage import list_results, load_result
 from task_queue import get_task_status, list_tasks, start_workers, submit_task
 
@@ -226,6 +227,11 @@ def _show_paper_cut_page() -> None:
         enable_image_crop = st.toggle("腾讯云二次切边/弯曲矫正", value=False)
 
     if st.button("调用腾讯云切题", type="primary"):
+        clear_runtime_files()
+        cleanup_runtime_files(force=True)
+        st.session_state.pop("paper_cut_result", None)
+        st.session_state.pop("paper_cut_original_path", None)
+        st.session_state.pop("paper_cut_processed", None)
         original_path = _save_processing_upload(uploaded_file)
         processing_result = process_document_image(original_path, enhance_mode="strong")
         enhanced_path = processing_result.get("enhanced_path")
@@ -445,6 +451,7 @@ def _show_result(task_id: str) -> None:
 def main() -> None:
     st.set_page_config(page_title="智能作业批改系统", layout="wide")
     ensure_runtime_dirs()
+    cleanup_runtime_files()
     start_workers()
 
     st.title("中小学作业智能批改系统")
