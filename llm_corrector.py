@@ -6,12 +6,6 @@ from typing import Any
 
 import requests
 
-from arithmetic_checker import (
-    arithmetic_checks_to_prompt,
-    arithmetic_error_note,
-    check_arithmetic_questions,
-    score_cap_ratio,
-)
 from config import get_int_setting, get_setting
 
 
@@ -93,15 +87,6 @@ def _mock_correction(ocr_result: dict[str, Any]) -> dict[str, Any]:
 def _prompt_for(ocr_result: dict[str, Any]) -> str:
     ocr_text = ocr_result.get("ocr_text", "")
     questions = ocr_result.get("questions", [])
-    arithmetic_summary = arithmetic_checks_to_prompt(check_arithmetic_questions(questions))
-    arithmetic_section = (
-        f"""
-本地基础算术校验结果（优先于模型心算；如果这里指出错误，必须按错误扣分）：
-{arithmetic_summary}
-""".strip()
-        if arithmetic_summary
-        else "本地基础算术校验结果：未发现可稳定解析的基础算式。"
-    )
     return f"""
 你是一名严谨、耐心的中小学作业批改老师。请根据 OCR 识别结果批改学生作业，输出详细但可控的逐题批改。
 
@@ -125,8 +110,6 @@ OCR 原文：
 
 OCR 结构化题目：
 {json.dumps(questions, ensure_ascii=False)}
-
-{arithmetic_section}
 
 返回 JSON 格式：
 {{
@@ -215,116 +198,6 @@ def _normalize_correction(payload: dict[str, Any]) -> dict[str, Any]:
         "next_steps": payload.get("next_steps", []),
         "questions": questions,
     }
-
-
-def _to_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _clean_number(value: float) -> int | float:
-    if value.is_integer():
-        return int(value)
-    return round(value, 2)
-
-
-def _append_detail(existing: Any, addition: str) -> str:
-    text = str(existing or "").strip()
-    if not text:
-        return addition
-    if addition in text:
-        return text
-    return f"{text}；{addition}"
-
-
-def _correct_answer_from_arithmetic(check: dict[str, Any]) -> str:
-    parts = [f"{fact['expression']}={fact['expected']}" for fact in check.get("facts", [])]
-    return "；".join(parts)
-
-
-def _question_key(item: dict[str, Any], fallback_index: int) -> str:
-    raw = item.get("question_no") or item.get("subject_index") or fallback_index
-    return str(raw).strip()
-
-
-def _recalculate_total_score(questions: list[dict[str, Any]]) -> int | None:
-    total_score = 0.0
-    total_max = 0.0
-    for item in questions:
-        score = _to_float(item.get("score"))
-        max_score = _to_float(item.get("max_score"))
-        if score is None or max_score is None or max_score <= 0:
-            return None
-        total_score += max(0.0, min(score, max_score))
-        total_max += max_score
-    if total_max <= 0:
-        return None
-    return max(0, min(100, int(round(total_score / total_max * 100))))
-
-
-def _build_score_breakdown(questions: list[dict[str, Any]], total_score: int | None) -> str:
-    parts = []
-    for index, item in enumerate(questions, start=1):
-        score = item.get("score", "-")
-        max_score = item.get("max_score", "-")
-        question_no = item.get("question_no") or index
-        parts.append(f"第{question_no}题 {score}/{max_score}")
-    if total_score is not None:
-        parts.append(f"总分{total_score}/100")
-    parts.append("含本地基础算术校验")
-    return "，".join(parts)
-
-
-def _apply_arithmetic_guard(correction: dict[str, Any], checks: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    questions = correction.get("questions")
-    if not isinstance(questions, list) or not checks:
-        return correction
-
-    changed = False
-    for index, question in enumerate(questions, start=1):
-        if not isinstance(question, dict):
-            continue
-        check = checks.get(_question_key(question, index))
-        if not check or not check.get("has_errors"):
-            continue
-
-        score = _to_float(question.get("score"))
-        max_score = _to_float(question.get("max_score"))
-        needs_guard = question.get("is_correct") is True
-        if score is not None and max_score is not None and max_score > 0 and score >= max_score:
-            needs_guard = True
-        if not needs_guard:
-            question["arithmetic_check"] = check
-            continue
-
-        note = arithmetic_error_note(check)
-        question["is_correct"] = False
-        question["arithmetic_check"] = check
-        question["deduction_reason"] = _append_detail(question.get("deduction_reason"), note)
-        question["analysis"] = _append_detail(question.get("analysis"), note)
-        question["comment"] = "本地算术校验发现基础计算错误，请订正。"
-        correct_answer = _correct_answer_from_arithmetic(check)
-        if correct_answer:
-            question["correct_answer"] = correct_answer
-
-        if max_score is not None and max_score > 0:
-            cap = max_score * score_cap_ratio(check)
-            if score is None:
-                score = cap
-            question["score"] = _clean_number(max(0.0, min(score, cap)))
-        changed = True
-
-    if changed:
-        valid_questions = [item for item in questions if isinstance(item, dict)]
-        recalculated = _recalculate_total_score(valid_questions)
-        if recalculated is not None:
-            correction["score"] = recalculated
-        correction["score_breakdown"] = _build_score_breakdown(valid_questions, recalculated)
-    return correction
 
 
 def _is_deepseek_base_url(base_url: str) -> bool:
@@ -432,10 +305,8 @@ def correct_homework(ocr_result: dict[str, Any]) -> dict[str, Any]:
             "或将 LLM_MODE 设置为 mock 先跑通演示流程。"
         )
 
-    arithmetic_checks = check_arithmetic_questions(ocr_result.get("questions", []))
-
     try:
-        correction = _request_correction(
+        return _request_correction(
             base_url=base_url,
             api_key=api_key,
             model=model,
@@ -443,7 +314,7 @@ def correct_homework(ocr_result: dict[str, Any]) -> dict[str, Any]:
             max_tokens=max_tokens,
         )
     except ValueError:
-        correction = _request_correction(
+        return _request_correction(
             base_url=base_url,
             api_key=api_key,
             model=model,
@@ -451,4 +322,3 @@ def correct_homework(ocr_result: dict[str, Any]) -> dict[str, Any]:
             max_tokens=max_tokens,
             retry_json=True,
         )
-    return _apply_arithmetic_guard(correction, arithmetic_checks)
