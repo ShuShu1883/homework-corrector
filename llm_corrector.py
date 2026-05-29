@@ -94,15 +94,16 @@ def _prompt_for(ocr_result: dict[str, Any]) -> str:
 1. 按 OCR 结构化题目逐题批改，不要漏题；如果 OCR 把多道题合并到同一块，请尽量在该块内区分题目。
 2. 总分使用 0-100 分制。每题满分由你根据题目数量、难度和步骤复杂度自动分配，所有题目满分合计约为 100。
 3. 每题必须给出题目理解、学生答案、是否正确、本题得分、满分、扣分原因、正确答案、详细题解、错因分析、订正建议和相关知识点。
-4. 每题必须按这个顺序批改：识别学生答案 -> 独立算出正确答案 -> 逐个小答案比对 -> 再决定 is_correct、score、max_score。
-5. 口算题、填空题或同一题内包含多个小答案时，只要任意一个小答案错误、漏答或 OCR 无法确认，本大题就不能满分。
-6. is_correct、score、max_score、comment、analysis、mistake_analysis、deduction_reason 必须一致：满分且无扣分无不确定时 is_correct 才能为 true；部分正确或需扣分时 score 必须小于 max_score。
-7. 输出前逐题自检：如果 analysis、comment、mistake_analysis 或 deduction_reason 中出现“错误、不是、应为、写成、算错、缺少、未填写、不完整、不确定”等含义，则该题必须 is_correct=false，score 必须小于 max_score，deduction_reason 必须非空。
-8. deduction_reason 非空时必须扣分；score 等于 max_score 时 deduction_reason 必须为空，且 comment/analysis 不能指出任何错误或缺失。
-9. 少写一个必填答案、缺少读作/单位/步骤、过程缺失或 OCR 无法确认完整过程时不能给满分，必须写明 deduction_reason。
-10. 题解要具体到关键步骤，但不要过度冗长；每题 solution_steps 建议 3-6 步。
-11. 如果 OCR 内容不完整或看不清，不要编造。请降低 confidence，并在 uncertain_reason 中说明不确定原因；有 uncertain_reason 时不要给满分。
-12. 必须只返回 JSON，不要输出 Markdown、代码块或额外解释。
+4. 重要：OCR 结构化题目中的 Answer、answer、ResultList.Answer 字段表示学生卷面作答或答案区域，不是标准答案。不要因为字段名是 Answer 就把它当作正确答案。
+5. 每题必须按这个顺序批改：识别题干和学生答案 -> 忽略 Answer 字段的“标准答案”含义 -> 根据题干和题目要求独立算出 correct_answer -> 逐个小答案比对 -> 再决定 is_correct、score、max_score。
+6. 口算题、填空题或同一题内包含多个小答案时，只要任意一个小答案错误、漏答或 OCR 无法确认，本大题就不能满分。
+7. is_correct、score、max_score、comment、analysis、mistake_analysis、deduction_reason 必须一致：满分且无扣分无不确定时 is_correct 才能为 true；部分正确或需扣分时 score 必须小于 max_score。
+8. 输出前逐题自检：如果 analysis、comment、mistake_analysis 或 deduction_reason 中出现“错误、不是、应为、写成、算错、缺少、未填写、不完整、不确定”等含义，则该题必须 is_correct=false，score 必须小于 max_score，deduction_reason 必须非空。
+9. deduction_reason 非空时必须扣分；score 等于 max_score 时 deduction_reason 必须为空，且 comment/analysis 不能指出任何错误或缺失。
+10. 少写一个必填答案、缺少读作/单位/步骤、过程缺失或 OCR 无法确认完整过程时不能给满分，必须写明 deduction_reason。
+11. 题解要具体到关键步骤，但不要过度冗长；每题 solution_steps 建议 3-6 步。
+12. 如果 OCR 内容不完整或看不清，不要编造。请降低 confidence，并在 uncertain_reason 中说明不确定原因；有 uncertain_reason 时不要给满分。
+13. 必须只返回 JSON，不要输出 Markdown、代码块或额外解释。
 
 OCR 原文：
 {ocr_text}
@@ -148,6 +149,7 @@ def _strict_json_retry_prompt(ocr_result: dict[str, Any]) -> str:
     return (
         "上一次回答没有形成可解析的 JSON。请重新批改，并且只输出一个合法 JSON 对象，"
         "不要包含 Markdown、代码块、解释文字或多余前后缀。"
+        "注意 OCR 里的 Answer/answer/ResultList.Answer 是学生作答，不是标准答案；必须先独立推导 correct_answer，再对比学生作答评分。"
         "重新输出前必须检查每题 JSON 内部一致性：只要批注、分析、错因或扣分原因指出错误、不是、应为、写成、缺少、未填写或不确定，"
         "该题就必须 is_correct=false，score 必须小于 max_score，deduction_reason 必须非空；只有完全正确且无扣分无不确定时才能满分。\n\n"
         f"{_prompt_for(ocr_result)}"
