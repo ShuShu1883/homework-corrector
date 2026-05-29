@@ -6,7 +6,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from config import DEBUG_DIR, PROCESSED_DIR, ensure_runtime_dirs
 
@@ -167,6 +167,217 @@ def create_preview_image(image_path: str, task_id: str | None = None, suffix: st
     preview_path = PROCESSED_DIR / f"{task_id}_{suffix}.jpg"
     image.save(preview_path, format="JPEG", quality=82, optimize=True)
     return str(preview_path)
+
+
+def _annotation_font(size: int) -> ImageFont.ImageFont:
+    candidates = [
+        Path("C:/Windows/Fonts/msyh.ttc"),
+        Path("C:/Windows/Fonts/simhei.ttf"),
+        Path("C:/Windows/Fonts/simsun.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                return ImageFont.truetype(str(path), size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
+def _text_bbox(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font: ImageFont.ImageFont) -> tuple[int, int, int, int]:
+    try:
+        return draw.textbbox(xy, text, font=font)
+    except UnicodeEncodeError:
+        return draw.textbbox(xy, text.encode("ascii", "ignore").decode("ascii") or "-", font=font)
+
+
+def _draw_text_safe(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    *,
+    font: ImageFont.ImageFont,
+    fill: tuple[int, int, int],
+) -> None:
+    try:
+        draw.text(xy, text, font=font, fill=fill)
+    except UnicodeEncodeError:
+        fallback = text.encode("ascii", "ignore").decode("ascii") or "-"
+        draw.text(xy, fallback, font=font, fill=fill)
+
+
+def _short_text(value: Any, max_chars: int = 28) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars - 1]}..."
+
+
+def _question_key(item: dict[str, Any], fallback_index: int) -> str:
+    raw = item.get("question_no") or item.get("subject_index") or fallback_index
+    return str(raw).strip()
+
+
+def _correction_by_question(corrections: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    mapped: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(corrections, start=1):
+        mapped[_question_key(item, index)] = item
+    return mapped
+
+
+def _matched_correction(
+    question: dict[str, Any],
+    question_index: int,
+    corrections: list[dict[str, Any]],
+    correction_map: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    key = _question_key(question, question_index)
+    if key in correction_map:
+        return correction_map[key]
+    if question_index - 1 < len(corrections):
+        return corrections[question_index - 1]
+    return {}
+
+
+def _numeric_score(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _annotation_status(correction: dict[str, Any]) -> tuple[str, tuple[int, int, int]]:
+    score = _numeric_score(correction.get("score"))
+    max_score = _numeric_score(correction.get("max_score"))
+    if score is None or max_score is None or max_score <= 0:
+        return "待判断", (108, 117, 125)
+
+    if score >= max_score:
+        return "满分", (30, 136, 68)
+    if score >= max_score * 0.5:
+        return "部分正确", (214, 143, 0)
+    return "需订正", (200, 45, 45)
+
+
+def _score_label(correction: dict[str, Any]) -> str:
+    score = correction.get("score")
+    max_score = correction.get("max_score")
+    if score not in (None, "") and max_score not in (None, ""):
+        return f"{score}/{max_score}"
+    if score not in (None, ""):
+        return str(score)
+    return ""
+
+
+def _normalized_bbox(bbox: Any, width: int, height: int) -> tuple[int, int, int, int] | None:
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return None
+    try:
+        left, top, right, bottom = [int(float(value)) for value in bbox]
+    except (TypeError, ValueError):
+        return None
+
+    left = max(0, min(left, width - 1))
+    right = max(0, min(right, width - 1))
+    top = max(0, min(top, height - 1))
+    bottom = max(0, min(bottom, height - 1))
+    if right <= left or bottom <= top:
+        return None
+    return left, top, right, bottom
+
+
+def _label_position(
+    bbox: tuple[int, int, int, int],
+    label_width: int,
+    label_height: int,
+    image_width: int,
+    image_height: int,
+    padding: int,
+) -> tuple[int, int]:
+    left, top, right, bottom = bbox
+    x = max(0, min(left, image_width - label_width - 1))
+
+    if top - label_height - padding >= 0:
+        y = top - label_height - padding
+    elif bottom + padding + label_height < image_height:
+        y = bottom + padding
+    else:
+        y = min(max(top + padding, 0), max(0, image_height - label_height - 1))
+
+    return x, y
+
+
+def create_annotated_correction_image(
+    image_path: str,
+    paper_cut_questions: list[dict[str, Any]],
+    corrections: list[dict[str, Any]],
+    *,
+    task_id: str | None = None,
+) -> str | None:
+    ensure_runtime_dirs()
+    task_id = task_id or str(uuid.uuid4())
+
+    image = ImageOps.exif_transpose(Image.open(image_path)).convert("RGB")
+    width, height = image.size
+    draw = ImageDraw.Draw(image)
+    font_size = max(18, min(34, width // 42))
+    font = _annotation_font(font_size)
+    small_font = _annotation_font(max(15, int(font_size * 0.82)))
+    correction_map = _correction_by_question(corrections)
+    thickness = max(4, width // 320)
+    padding = max(8, width // 160)
+    annotated_count = 0
+
+    for index, question in enumerate(paper_cut_questions, start=1):
+        bbox = _normalized_bbox(question.get("bbox"), width, height)
+        if not bbox:
+            continue
+
+        correction = _matched_correction(question, index, corrections, correction_map)
+        status_text, color = _annotation_status(correction)
+        score = _score_label(correction)
+        question_no = question.get("question_no") or question.get("subject_index") or index
+        first_line = f"第{question_no}题 {status_text}"
+        if score:
+            first_line = f"{first_line} {score}"
+        second_line = _short_text(correction.get("comment") or correction.get("deduction_reason") or "暂无批注")
+
+        draw.rectangle(bbox, outline=color, width=thickness)
+
+        first_bbox = _text_bbox(draw, (0, 0), first_line, font)
+        second_bbox = _text_bbox(draw, (0, 0), second_line, small_font)
+        text_width = max(first_bbox[2] - first_bbox[0], second_bbox[2] - second_bbox[0])
+        text_height = (first_bbox[3] - first_bbox[1]) + (second_bbox[3] - second_bbox[1]) + padding
+        label_width = text_width + padding * 2
+        label_height = text_height + padding
+        label_x, label_y = _label_position(bbox, label_width, label_height, width, height, padding)
+
+        draw.rectangle(
+            (label_x, label_y, label_x + label_width, label_y + label_height),
+            fill=color,
+            outline=color,
+        )
+        _draw_text_safe(draw, (label_x + padding, label_y + padding // 2), first_line, font=font, fill=(255, 255, 255))
+        _draw_text_safe(
+            draw,
+            (label_x + padding, label_y + padding // 2 + (first_bbox[3] - first_bbox[1]) + padding // 2),
+            second_line,
+            font=small_font,
+            fill=(255, 255, 255),
+        )
+        annotated_count += 1
+
+    if annotated_count == 0:
+        return None
+
+    annotated_path = PROCESSED_DIR / f"{task_id}_annotated.jpg"
+    image.save(annotated_path, format="JPEG", quality=92, optimize=True)
+    return str(annotated_path)
 
 
 def order_points(points: np.ndarray) -> np.ndarray:

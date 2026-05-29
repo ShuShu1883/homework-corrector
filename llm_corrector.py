@@ -10,7 +10,7 @@ from config import get_int_setting, get_setting
 
 
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com"
-DEFAULT_LLM_MODEL = "deepseek-v4-flash"
+DEFAULT_LLM_MODEL = "deepseek-v4-pro"
 DEFAULT_MAX_TOKENS = 4096
 
 
@@ -94,9 +94,11 @@ def _prompt_for(ocr_result: dict[str, Any]) -> str:
 1. 按 OCR 结构化题目逐题批改，不要漏题；如果 OCR 把多道题合并到同一块，请尽量在该块内区分题目。
 2. 总分使用 0-100 分制。每题满分由你根据题目数量、难度和步骤复杂度自动分配，所有题目满分合计约为 100。
 3. 每题必须给出题目理解、学生答案、是否正确、本题得分、满分、扣分原因、正确答案、详细题解、错因分析、订正建议和相关知识点。
-4. 题解要具体到关键步骤，但不要过度冗长；每题 solution_steps 建议 3-6 步。
-5. 如果 OCR 内容不完整或看不清，不要编造。请降低 confidence，并在 uncertain_reason 中说明不确定原因。
-6. 必须只返回 JSON，不要输出 Markdown、代码块或额外解释。
+4. is_correct、score、max_score 必须一致：满分且无不确定时 is_correct 才能为 true；部分正确或需扣分时 score 必须小于 max_score。
+5. 少写一个必填答案、缺少读作/单位/步骤、过程缺失或 OCR 无法确认完整过程时不能给满分，必须写明 deduction_reason。
+6. 题解要具体到关键步骤，但不要过度冗长；每题 solution_steps 建议 3-6 步。
+7. 如果 OCR 内容不完整或看不清，不要编造。请降低 confidence，并在 uncertain_reason 中说明不确定原因。
+8. 必须只返回 JSON，不要输出 Markdown、代码块或额外解释。
 
 OCR 原文：
 {ocr_text}
@@ -169,6 +171,7 @@ def _normalize_correction(payload: dict[str, Any]) -> dict[str, Any]:
     questions = payload.get("questions")
     if not isinstance(questions, list):
         questions = []
+    questions = [item for item in questions if isinstance(item, dict)]
 
     score = payload.get("score", 0)
     try:

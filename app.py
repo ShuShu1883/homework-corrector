@@ -75,6 +75,15 @@ def _write_detail(label: str, value: Any) -> None:
         st.write(text)
 
 
+def _question_display_status(item: dict[str, Any]) -> str:
+    is_correct = item.get("is_correct")
+    if is_correct is True:
+        return "正确"
+    if is_correct is False:
+        return "错误"
+    return "待判断"
+
+
 def _build_report(result: dict[str, Any]) -> str:
     lines = [
         "# 智能作业批改报告",
@@ -84,6 +93,7 @@ def _build_report(result: dict[str, Any]) -> str:
         f"- 总分：{result.get('score', '-')}",
         f"- 正确率：{_correct_rate(result.get('questions', []))}",
         f"- 识别题数：{len(result.get('paper_cut_questions') or result.get('questions', []))}",
+        f"- 批注图：{result.get('annotated_image_path') or '暂无'}",
         "",
         "## 总体评价",
         result.get("summary") or "暂无",
@@ -115,8 +125,7 @@ def _build_report(result: dict[str, Any]) -> str:
     ]
 
     for item in result.get("questions", []):
-        is_correct = item.get("is_correct")
-        status = "正确" if is_correct is True else "错误" if is_correct is False else "待判断"
+        status = _question_display_status(item)
         lines.extend(
             [
                 "",
@@ -449,6 +458,11 @@ def _show_result(task_id: str) -> None:
 
     left, right = st.columns([1, 1])
     with left:
+        annotated_image_path = result.get("annotated_image_path") if result else None
+        if annotated_image_path and Path(annotated_image_path).exists():
+            st.markdown("#### 批注后送检图")
+            st.image(annotated_image_path, use_container_width=True)
+
         st.markdown("#### 原始作业图")
         image_preview_path = result.get("image_preview_path") if result else image_path
         if image_preview_path and Path(image_preview_path).exists():
@@ -491,8 +505,7 @@ def _show_result(task_id: str) -> None:
     if result and result.get("status") == "finished":
         st.markdown("#### 逐题批改")
         for item in result.get("questions", []):
-            is_correct = item.get("is_correct")
-            badge = "正确" if is_correct is True else "错误" if is_correct is False else "待判断"
+            badge = _question_display_status(item)
             score_text = f"{item.get('score', '-')} / {item.get('max_score', '-')}"
             with st.expander(f"第 {item.get('question_no', '-')} 题 · {badge} · {score_text}", expanded=False):
                 cols = st.columns(3)
@@ -603,13 +616,13 @@ TENCENT_OCR_REGION=ap-guangzhou
 LLM_MODE=mock
 ```
 
-如果要调用 DeepSeek V4 Flash 做真实批改，请在本地 `.env` 或 Streamlit Secrets 中配置：
+如果要调用 DeepSeek V4 Pro 做真实批改，请在本地 `.env` 或 Streamlit Secrets 中配置：
 
 ```text
 LLM_MODE=api
 LLM_API_KEY=你的DeepSeek API Key
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-flash
+LLM_MODEL=deepseek-v4-pro
 LLM_MAX_TOKENS=4096
 DEEPSEEK_THINKING=disabled
 ```
