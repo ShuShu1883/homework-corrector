@@ -82,16 +82,18 @@ TENCENT_SECRET_KEY=你的腾讯云SecretKey
 TENCENT_OCR_REGION=ap-guangzhou
 ```
 
-大模型 API 采用 OpenAI-compatible 格式：
+大模型 API 默认采用 DeepSeek OpenAI-compatible 格式，演示模型使用低成本的 `deepseek-v4-flash`。API key 只能放在本地 `.env` 或 Streamlit Secrets 中，不要写入源码或提交到 GitHub：
 
 ```text
 LLM_MODE=api
-LLM_API_KEY=你的key
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=你的DeepSeek API Key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+LLM_MAX_TOKENS=4096
+DEEPSEEK_THINKING=disabled
 ```
 
-如果使用 DeepSeek、通义千问等兼容接口，只需要修改 `LLM_BASE_URL` 和 `LLM_MODEL`。
+也可以使用 `DEEPSEEK_API_KEY` 代替 `LLM_API_KEY`。如果切换到其他 OpenAI-compatible 服务商，只需要修改 `LLM_BASE_URL` 和 `LLM_MODEL`。
 
 ## 报告可用表述
 

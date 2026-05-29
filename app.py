@@ -54,6 +54,27 @@ def _correct_rate(questions: list[dict[str, Any]]) -> str:
     return f"{correct / len(judged):.0%}"
 
 
+def _stringify_detail(value: Any, default: str = "暂无") -> str:
+    if value in (None, ""):
+        return default
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return "\n".join(f"- {item}" for item in parts) if parts else default
+    if isinstance(value, dict):
+        parts = [f"{key}：{val}" for key, val in value.items() if val not in (None, "", [])]
+        return "\n".join(f"- {item}" for item in parts) if parts else default
+    return str(value)
+
+
+def _write_detail(label: str, value: Any) -> None:
+    st.markdown(f"**{label}**")
+    text = _stringify_detail(value)
+    if text.startswith("- "):
+        st.markdown(text)
+    else:
+        st.write(text)
+
+
 def _build_report(result: dict[str, Any]) -> str:
     lines = [
         "# 智能作业批改报告",
@@ -62,15 +83,28 @@ def _build_report(result: dict[str, Any]) -> str:
         f"- 状态：{STATUS_LABELS.get(result.get('status'), result.get('status', '-'))}",
         f"- 总分：{result.get('score', '-')}",
         f"- 正确率：{_correct_rate(result.get('questions', []))}",
+        f"- 识别题数：{len(result.get('paper_cut_questions') or result.get('questions', []))}",
         "",
         "## 总体评价",
         result.get("summary") or "暂无",
+        "",
+        "## 评分构成",
+        _stringify_detail(result.get("score_breakdown")),
         "",
         "## 批注",
         result.get("comments") or "暂无",
         "",
         "## 学习建议",
         result.get("suggestions") or "暂无",
+        "",
+        "## 优势",
+        _stringify_detail(result.get("strengths")),
+        "",
+        "## 薄弱点",
+        _stringify_detail(result.get("weaknesses")),
+        "",
+        "## 下一步",
+        _stringify_detail(result.get("next_steps")),
         "",
         "## OCR 识别结果",
         "```text",
@@ -87,12 +121,29 @@ def _build_report(result: dict[str, Any]) -> str:
             [
                 "",
                 f"### 第 {item.get('question_no', '-')} 题：{status}",
+                f"- 得分：{item.get('score', '-')} / {item.get('max_score', '-')}",
+                f"- 题目理解：{item.get('question_understanding', '-')}",
                 f"- 学生答案：{item.get('student_answer', '-')}",
                 f"- 正确答案：{item.get('correct_answer', '-')}",
                 f"- 分析：{item.get('analysis', '-')}",
                 f"- 批注：{item.get('comment', '-')}",
+                f"- 扣分原因：{item.get('deduction_reason', '-')}",
+                "",
+                "#### 详细题解",
+                _stringify_detail(item.get("solution_steps")),
+                "",
+                "#### 错因分析",
+                _stringify_detail(item.get("mistake_analysis")),
+                "",
+                "#### 订正建议",
+                _stringify_detail(item.get("revision_advice")),
+                "",
+                "#### 知识点",
+                _stringify_detail(item.get("knowledge_points")),
             ]
         )
+        if item.get("uncertain_reason"):
+            lines.extend(["", f"- OCR 不确定说明：{item.get('uncertain_reason')}"])
     return "\n".join(lines)
 
 
@@ -381,10 +432,12 @@ def _show_result(task_id: str) -> None:
     status_text = STATUS_LABELS.get(status.get("status"), status.get("status", "未知"))
     st.caption(f"任务ID：{task_id}")
 
-    col_a, col_b, col_c = st.columns(3)
+    question_count = len(result.get("paper_cut_questions") or result.get("questions", [])) if result else "-"
+    col_a, col_b, col_c, col_d = st.columns(4)
     col_a.metric("状态", status_text)
     col_b.metric("总分", result.get("score", "-") if result else status.get("score", "-"))
     col_c.metric("正确率", _correct_rate(result.get("questions", [])) if result else "-")
+    col_d.metric("识别题数", question_count)
 
     if status.get("error"):
         st.error(status["error"])
@@ -420,21 +473,44 @@ def _show_result(task_id: str) -> None:
             return
 
         st.write(result.get("summary") or "暂无总体评价。")
+        if result.get("score_breakdown"):
+            st.markdown("**评分构成**")
+            st.write(_stringify_detail(result.get("score_breakdown")))
         st.markdown("**总体批注**")
         st.write(result.get("comments") or "暂无批注。")
         st.markdown("**学习建议**")
         st.write(result.get("suggestions") or "暂无建议。")
+        extra_cols = st.columns(3)
+        with extra_cols[0]:
+            _write_detail("优势", result.get("strengths"))
+        with extra_cols[1]:
+            _write_detail("薄弱点", result.get("weaknesses"))
+        with extra_cols[2]:
+            _write_detail("下一步", result.get("next_steps"))
 
     if result and result.get("status") == "finished":
         st.markdown("#### 逐题批改")
         for item in result.get("questions", []):
             is_correct = item.get("is_correct")
             badge = "正确" if is_correct is True else "错误" if is_correct is False else "待判断"
-            with st.expander(f"第 {item.get('question_no', '-')} 题 · {badge}", expanded=False):
+            score_text = f"{item.get('score', '-')} / {item.get('max_score', '-')}"
+            with st.expander(f"第 {item.get('question_no', '-')} 题 · {badge} · {score_text}", expanded=False):
+                cols = st.columns(3)
+                cols[0].metric("本题得分", item.get("score", "-"))
+                cols[1].metric("本题满分", item.get("max_score", "-"))
+                cols[2].metric("可信度", item.get("confidence", "-"))
+
+                _write_detail("题目理解", item.get("question_understanding"))
                 st.write(f"学生答案：{item.get('student_answer', '-')}")
                 st.write(f"正确答案：{item.get('correct_answer', '-')}")
-                st.write(f"分析：{item.get('analysis', '-')}")
+                _write_detail("详细题解", item.get("solution_steps") or item.get("analysis"))
+                _write_detail("错因分析", item.get("mistake_analysis"))
+                _write_detail("扣分原因", item.get("deduction_reason"))
+                _write_detail("订正建议", item.get("revision_advice"))
+                _write_detail("相关知识点", item.get("knowledge_points"))
                 st.write(f"批注：{item.get('comment', '-')}")
+                if item.get("uncertain_reason"):
+                    st.warning(f"OCR 不确定说明：{item.get('uncertain_reason')}")
 
         st.markdown("#### OCR 识别文本")
         st.text_area("OCR 文本", result.get("ocr_text", ""), height=160, label_visibility="collapsed")
@@ -525,6 +601,17 @@ TENCENT_SECRET_ID=你的腾讯云SecretId
 TENCENT_SECRET_KEY=你的腾讯云SecretKey
 TENCENT_OCR_REGION=ap-guangzhou
 LLM_MODE=mock
+```
+
+如果要调用 DeepSeek V4 Flash 做真实批改，请在本地 `.env` 或 Streamlit Secrets 中配置：
+
+```text
+LLM_MODE=api
+LLM_API_KEY=你的DeepSeek API Key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+LLM_MAX_TOKENS=4096
+DEEPSEEK_THINKING=disabled
 ```
 """
         )
