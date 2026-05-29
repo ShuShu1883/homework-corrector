@@ -94,11 +94,15 @@ def _prompt_for(ocr_result: dict[str, Any]) -> str:
 1. 按 OCR 结构化题目逐题批改，不要漏题；如果 OCR 把多道题合并到同一块，请尽量在该块内区分题目。
 2. 总分使用 0-100 分制。每题满分由你根据题目数量、难度和步骤复杂度自动分配，所有题目满分合计约为 100。
 3. 每题必须给出题目理解、学生答案、是否正确、本题得分、满分、扣分原因、正确答案、详细题解、错因分析、订正建议和相关知识点。
-4. is_correct、score、max_score 必须一致：满分且无不确定时 is_correct 才能为 true；部分正确或需扣分时 score 必须小于 max_score。
-5. 少写一个必填答案、缺少读作/单位/步骤、过程缺失或 OCR 无法确认完整过程时不能给满分，必须写明 deduction_reason。
-6. 题解要具体到关键步骤，但不要过度冗长；每题 solution_steps 建议 3-6 步。
-7. 如果 OCR 内容不完整或看不清，不要编造。请降低 confidence，并在 uncertain_reason 中说明不确定原因。
-8. 必须只返回 JSON，不要输出 Markdown、代码块或额外解释。
+4. 每题必须按这个顺序批改：识别学生答案 -> 独立算出正确答案 -> 逐个小答案比对 -> 再决定 is_correct、score、max_score。
+5. 口算题、填空题或同一题内包含多个小答案时，只要任意一个小答案错误、漏答或 OCR 无法确认，本大题就不能满分。
+6. is_correct、score、max_score、comment、analysis、mistake_analysis、deduction_reason 必须一致：满分且无扣分无不确定时 is_correct 才能为 true；部分正确或需扣分时 score 必须小于 max_score。
+7. 输出前逐题自检：如果 analysis、comment、mistake_analysis 或 deduction_reason 中出现“错误、不是、应为、写成、算错、缺少、未填写、不完整、不确定”等含义，则该题必须 is_correct=false，score 必须小于 max_score，deduction_reason 必须非空。
+8. deduction_reason 非空时必须扣分；score 等于 max_score 时 deduction_reason 必须为空，且 comment/analysis 不能指出任何错误或缺失。
+9. 少写一个必填答案、缺少读作/单位/步骤、过程缺失或 OCR 无法确认完整过程时不能给满分，必须写明 deduction_reason。
+10. 题解要具体到关键步骤，但不要过度冗长；每题 solution_steps 建议 3-6 步。
+11. 如果 OCR 内容不完整或看不清，不要编造。请降低 confidence，并在 uncertain_reason 中说明不确定原因；有 uncertain_reason 时不要给满分。
+12. 必须只返回 JSON，不要输出 Markdown、代码块或额外解释。
 
 OCR 原文：
 {ocr_text}
@@ -119,19 +123,19 @@ OCR 结构化题目：
   "questions": [
     {{
       "question_no": "1",
-      "is_correct": true,
-      "score": 40,
+      "is_correct": false,
+      "score": 32,
       "max_score": 40,
-      "question_understanding": "本题考查内容和题意理解",
-      "student_answer": "学生答案",
-      "correct_answer": "正确答案",
-      "analysis": "解题分析",
-      "comment": "简短批注",
-      "deduction_reason": "扣分原因，答对可为空",
-      "solution_steps": ["步骤1", "步骤2", "步骤3"],
-      "mistake_analysis": "错因分析，答对也可说明为什么正确",
-      "knowledge_points": ["知识点1", "知识点2"],
-      "revision_advice": "订正建议",
+      "question_understanding": "本题包含多道口算，需要逐个结果正确才可满分。",
+      "student_answer": "25×4=100，360÷90=4，125×8=1000，480÷60=7，36×2=72，810÷9=90",
+      "correct_answer": "25×4=100，360÷90=4，125×8=1000，480÷60=8，36×2=72，810÷9=90",
+      "analysis": "逐项验算后发现 480÷60 应为 8，学生写成 7，其余小题正确，因此本题不能满分。",
+      "comment": "注意 480÷60=8，不是 7。",
+      "deduction_reason": "有 1 个口算结果错误，扣除对应结果分。",
+      "solution_steps": ["逐项验算每个算式。", "480÷60 可化为 48÷6=8。", "学生写成 7，因此该小题错误。"],
+      "mistake_analysis": "除法口算时没有正确利用 60×8=480 的关系。",
+      "knowledge_points": ["整数除法", "口算验算"],
+      "revision_advice": "订正为 480÷60=8，并用 60×8=480 反向验算。",
       "confidence": "high",
       "uncertain_reason": ""
     }}
@@ -143,7 +147,9 @@ OCR 结构化题目：
 def _strict_json_retry_prompt(ocr_result: dict[str, Any]) -> str:
     return (
         "上一次回答没有形成可解析的 JSON。请重新批改，并且只输出一个合法 JSON 对象，"
-        "不要包含 Markdown、代码块、解释文字或多余前后缀。\n\n"
+        "不要包含 Markdown、代码块、解释文字或多余前后缀。"
+        "重新输出前必须检查每题 JSON 内部一致性：只要批注、分析、错因或扣分原因指出错误、不是、应为、写成、缺少、未填写或不确定，"
+        "该题就必须 is_correct=false，score 必须小于 max_score，deduction_reason 必须非空；只有完全正确且无扣分无不确定时才能满分。\n\n"
         f"{_prompt_for(ocr_result)}"
     )
 
