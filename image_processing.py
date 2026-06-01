@@ -209,13 +209,6 @@ def _draw_text_safe(
         draw.text(xy, fallback, font=font, fill=fill)
 
 
-def _short_text(value: Any, max_chars: int = 28) -> str:
-    text = str(value or "").replace("\n", " ").strip()
-    if len(text) <= max_chars:
-        return text
-    return f"{text[:max_chars - 1]}..."
-
-
 def _question_key(item: dict[str, Any], fallback_index: int) -> str:
     raw = item.get("question_no") or item.get("subject_index") or fallback_index
     return str(raw).strip()
@@ -327,7 +320,6 @@ def create_annotated_correction_image(
     draw = ImageDraw.Draw(image)
     font_size = max(18, min(34, width // 42))
     font = _annotation_font(font_size)
-    small_font = _annotation_font(max(15, int(font_size * 0.82)))
     correction_map = _correction_by_question(corrections)
     thickness = max(4, width // 320)
     padding = max(8, width // 160)
@@ -345,14 +337,12 @@ def create_annotated_correction_image(
         first_line = f"第{question_no}题 {status_text}"
         if score:
             first_line = f"{first_line} {score}"
-        second_line = _short_text(correction.get("comment") or correction.get("deduction_reason") or "暂无批注")
 
         draw.rectangle(bbox, outline=color, width=thickness)
 
         first_bbox = _text_bbox(draw, (0, 0), first_line, font)
-        second_bbox = _text_bbox(draw, (0, 0), second_line, small_font)
-        text_width = max(first_bbox[2] - first_bbox[0], second_bbox[2] - second_bbox[0])
-        text_height = (first_bbox[3] - first_bbox[1]) + (second_bbox[3] - second_bbox[1]) + padding
+        text_width = first_bbox[2] - first_bbox[0]
+        text_height = first_bbox[3] - first_bbox[1]
         label_width = text_width + padding * 2
         label_height = text_height + padding
         label_x, label_y = _label_position(bbox, label_width, label_height, width, height, padding)
@@ -363,13 +353,6 @@ def create_annotated_correction_image(
             outline=color,
         )
         _draw_text_safe(draw, (label_x + padding, label_y + padding // 2), first_line, font=font, fill=(255, 255, 255))
-        _draw_text_safe(
-            draw,
-            (label_x + padding, label_y + padding // 2 + (first_bbox[3] - first_bbox[1]) + padding // 2),
-            second_line,
-            font=small_font,
-            fill=(255, 255, 255),
-        )
         annotated_count += 1
 
     if annotated_count == 0:

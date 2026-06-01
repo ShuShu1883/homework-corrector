@@ -121,6 +121,70 @@ def _question_display_status(item: dict[str, Any]) -> str:
     return "待判断"
 
 
+def _question_key(item: dict[str, Any], fallback_index: int = 1) -> str:
+    value = item.get("question_no") or item.get("subject_index") or fallback_index
+    return str(value).strip()
+
+
+def _question_options(questions: list[dict[str, Any]]) -> list[str]:
+    return [_question_key(item, index) for index, item in enumerate(questions, start=1) if isinstance(item, dict)]
+
+
+def _question_by_no(questions: list[dict[str, Any]], question_no: str) -> dict[str, Any]:
+    for index, item in enumerate(questions, start=1):
+        if isinstance(item, dict) and _question_key(item, index) == str(question_no):
+            return item
+    return {}
+
+
+def _paper_cut_question_by_no(paper_cut_questions: list[dict[str, Any]], question_no: str) -> dict[str, Any]:
+    return _question_by_no(paper_cut_questions, question_no)
+
+
+def _write_overview(result: dict[str, Any]) -> None:
+    st.write(result.get("summary") or "暂无总体评价。")
+    if result.get("score_breakdown"):
+        st.markdown("**评分构成**")
+        st.write(_stringify_detail(result.get("score_breakdown")))
+    st.markdown("**总体批注**")
+    st.write(result.get("comments") or "暂无批注。")
+    st.markdown("**学习建议**")
+    st.write(result.get("suggestions") or "暂无建议。")
+    extra_cols = st.columns(3)
+    with extra_cols[0]:
+        _write_detail("优势", result.get("strengths"))
+    with extra_cols[1]:
+        _write_detail("薄弱点", result.get("weaknesses"))
+    with extra_cols[2]:
+        _write_detail("下一步", result.get("next_steps"))
+
+
+def _write_question_detail(item: dict[str, Any], paper_cut_question: dict[str, Any]) -> None:
+    badge = _question_display_status(item)
+    st.markdown(f"#### 第 {item.get('question_no', '-')} 题 · {badge}")
+    cols = st.columns(3)
+    cols[0].metric("本题得分", item.get("score", "-"))
+    cols[1].metric("本题满分", item.get("max_score", "-"))
+    cols[2].metric("可信度", item.get("confidence", "-"))
+
+    crop_path = paper_cut_question.get("crop_path")
+    if crop_path and Path(crop_path).exists():
+        with st.expander("查看本题区域", expanded=False):
+            st.image(crop_path, width="stretch")
+
+    _write_detail("题目理解", item.get("question_understanding"))
+    st.write(f"学生答案：{item.get('student_answer', '-')}")
+    st.write(f"正确答案：{item.get('correct_answer', '-')}")
+    _write_detail("详细题解", item.get("solution_steps") or item.get("analysis"))
+    _write_detail("错因分析", item.get("mistake_analysis"))
+    _write_detail("扣分原因", item.get("deduction_reason"))
+    _write_detail("订正建议", item.get("revision_advice"))
+    _write_detail("相关知识点", item.get("knowledge_points"))
+    st.write(f"批注：{item.get('comment', '-')}")
+    if item.get("uncertain_reason"):
+        st.warning(f"OCR 不确定说明：{item.get('uncertain_reason')}")
+
+
 def _build_report(result: dict[str, Any]) -> str:
     lines = [
         "# 智能作业批改报告",
@@ -489,90 +553,83 @@ def _show_result(task_id: str) -> None:
     if status.get("error"):
         st.error(status["error"])
 
-    image_path = None
-    if result:
-        image_path = result.get("image_path")
-    image_path = image_path or status.get("image_path")
+    image_path = (result.get("image_path") if result else None) or status.get("image_path")
+    if not result:
+        st.info("任务尚未完成。点击刷新可查看最新状态。")
+        return
 
-    left, right = st.columns([1, 1])
-    with left:
-        annotated_image_path = result.get("annotated_image_path") if result else None
-        if annotated_image_path and Path(annotated_image_path).exists():
+    if result.get("status") == "failed":
+        st.error(result.get("error") or "任务处理失败。")
+        return
+
+    with st.expander("查看整体评价", expanded=False):
+        _write_overview(result)
+
+    if result.get("status") == "finished":
+        questions = [item for item in result.get("questions", []) if isinstance(item, dict)]
+        paper_cut_questions = [
+            item for item in result.get("paper_cut_questions", []) if isinstance(item, dict)
+        ]
+        question_options = _question_options(questions)
+
+        left, right = st.columns([1.12, 1], gap="large")
+        with left:
             st.markdown("#### 批注后送检图")
-            st.image(annotated_image_path, use_container_width=True)
+            annotated_image_path = result.get("annotated_image_path")
+            if annotated_image_path and Path(annotated_image_path).exists():
+                st.image(annotated_image_path, width="stretch")
+            else:
+                st.info("暂无可显示的批注图。")
 
+        with right:
+            st.markdown("#### 单题批改")
+            if not question_options:
+                st.info("暂无逐题批改结果。")
+            else:
+                selected_question_no = st.segmented_control(
+                    "选择题目",
+                    question_options,
+                    default=question_options[0],
+                    format_func=lambda value: f"题目 {value}",
+                    key=f"selected_question_no_{task_id}",
+                    label_visibility="collapsed",
+                    width="stretch",
+                )
+                selected_question_no = str(selected_question_no or question_options[0])
+                selected_question = _question_by_no(questions, selected_question_no)
+                selected_paper_cut_question = _paper_cut_question_by_no(
+                    paper_cut_questions,
+                    selected_question_no,
+                )
+                if selected_question:
+                    _write_question_detail(selected_question, selected_paper_cut_question)
+                else:
+                    st.info("未找到对应题目的批改详情。")
+
+    with st.expander("查看原始图片与 OCR 文本", expanded=False):
         st.markdown("#### 原始作业图")
-        image_preview_path = result.get("image_preview_path") if result else image_path
+        image_preview_path = result.get("image_preview_path") or image_path
         if image_preview_path and Path(image_preview_path).exists():
-            st.image(image_preview_path, use_container_width=True)
+            st.image(image_preview_path, width="stretch")
         else:
             st.info("暂无可显示的原图。")
 
-        ocr_image_path = result.get("ocr_image_path") if result else None
-        ocr_preview_path = result.get("ocr_preview_path") if result else ocr_image_path
+        ocr_image_path = result.get("ocr_image_path")
+        ocr_preview_path = result.get("ocr_preview_path") or ocr_image_path
         if ocr_preview_path and Path(ocr_preview_path).exists():
             st.markdown("#### 增强后送检图")
-            st.image(ocr_preview_path, use_container_width=True)
-
-    with right:
-        st.markdown("#### 批改结果")
-        if not result:
-            st.info("任务尚未完成。点击刷新可查看最新状态。")
-            return
-
-        if result.get("status") == "failed":
-            st.error(result.get("error") or "任务处理失败。")
-            return
-
-        st.write(result.get("summary") or "暂无总体评价。")
-        if result.get("score_breakdown"):
-            st.markdown("**评分构成**")
-            st.write(_stringify_detail(result.get("score_breakdown")))
-        st.markdown("**总体批注**")
-        st.write(result.get("comments") or "暂无批注。")
-        st.markdown("**学习建议**")
-        st.write(result.get("suggestions") or "暂无建议。")
-        extra_cols = st.columns(3)
-        with extra_cols[0]:
-            _write_detail("优势", result.get("strengths"))
-        with extra_cols[1]:
-            _write_detail("薄弱点", result.get("weaknesses"))
-        with extra_cols[2]:
-            _write_detail("下一步", result.get("next_steps"))
-
-    if result and result.get("status") == "finished":
-        st.markdown("#### 逐题批改")
-        for item in result.get("questions", []):
-            badge = _question_display_status(item)
-            score_text = f"{item.get('score', '-')} / {item.get('max_score', '-')}"
-            with st.expander(f"第 {item.get('question_no', '-')} 题 · {badge} · {score_text}", expanded=False):
-                cols = st.columns(3)
-                cols[0].metric("本题得分", item.get("score", "-"))
-                cols[1].metric("本题满分", item.get("max_score", "-"))
-                cols[2].metric("可信度", item.get("confidence", "-"))
-
-                _write_detail("题目理解", item.get("question_understanding"))
-                st.write(f"学生答案：{item.get('student_answer', '-')}")
-                st.write(f"正确答案：{item.get('correct_answer', '-')}")
-                _write_detail("详细题解", item.get("solution_steps") or item.get("analysis"))
-                _write_detail("错因分析", item.get("mistake_analysis"))
-                _write_detail("扣分原因", item.get("deduction_reason"))
-                _write_detail("订正建议", item.get("revision_advice"))
-                _write_detail("相关知识点", item.get("knowledge_points"))
-                st.write(f"批注：{item.get('comment', '-')}")
-                if item.get("uncertain_reason"):
-                    st.warning(f"OCR 不确定说明：{item.get('uncertain_reason')}")
+            st.image(ocr_preview_path, width="stretch")
 
         st.markdown("#### OCR 识别文本")
         st.text_area("OCR 文本", result.get("ocr_text", ""), height=160, label_visibility="collapsed")
 
-        report = _build_report(result)
-        st.download_button(
-            "下载 Markdown 报告",
-            data=report.encode("utf-8"),
-            file_name=f"homework_report_{task_id}.md",
-            mime="text/markdown",
-        )
+    report = _build_report(result)
+    st.download_button(
+        "下载 Markdown 报告",
+        data=report.encode("utf-8"),
+        file_name=f"homework_report_{task_id}.md",
+        mime="text/markdown",
+    )
 
 
 def main() -> None:

@@ -1,7 +1,15 @@
 import unittest
 from unittest.mock import patch
 
-from app import _build_report, _correct_rate, _score_display, _task_rows
+from app import (
+    _build_report,
+    _correct_rate,
+    _paper_cut_question_by_no,
+    _question_by_no,
+    _question_options,
+    _score_display,
+    _task_rows,
+)
 
 
 class ScoreDisplayTests(unittest.TestCase):
@@ -75,6 +83,38 @@ class ScoreDisplayTests(unittest.TestCase):
             rows = _task_rows()
 
         self.assertEqual(rows[0]["分数"], "30/40")
+
+    def test_question_options_keep_result_order(self):
+        questions = [
+            {"question_no": "2"},
+            {"question_no": "1"},
+            {"question_no": "4"},
+        ]
+
+        self.assertEqual(_question_options(questions), ["2", "1", "4"])
+
+    def test_question_by_no_matches_correction(self):
+        questions = [
+            {"question_no": "1", "score": 10},
+            {"question_no": "2", "score": 20},
+        ]
+
+        self.assertEqual(_question_by_no(questions, "2")["score"], 20)
+        self.assertEqual(_question_by_no(questions, "missing"), {})
+
+    def test_paper_cut_question_by_no_matches_crop(self):
+        paper_cut_questions = [
+            {"question_no": "1", "crop_path": "q1.png"},
+            {"question_no": "2", "crop_path": "q2.png"},
+        ]
+
+        self.assertEqual(_paper_cut_question_by_no(paper_cut_questions, "2")["crop_path"], "q2.png")
+        self.assertEqual(_paper_cut_question_by_no(paper_cut_questions, "missing"), {})
+
+    def test_historical_question_without_crop_is_supported(self):
+        question = _paper_cut_question_by_no([{"question_no": "1"}], "1")
+
+        self.assertEqual(question.get("crop_path"), None)
 
 
 if __name__ == "__main__":
