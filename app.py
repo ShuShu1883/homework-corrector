@@ -44,14 +44,51 @@ def _uploaded_file_signature(uploaded_file: Any) -> str:
     return f"{uploaded_file.name}:{uploaded_file.size}:{digest}"
 
 
+def _score_number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _score_totals(questions: list[dict[str, Any]]) -> tuple[float, float] | None:
+    total_score = 0.0
+    total_max_score = 0.0
+    has_score = False
+    for item in questions:
+        if not isinstance(item, dict):
+            continue
+        score = _score_number(item.get("score"))
+        max_score = _score_number(item.get("max_score"))
+        if score is None or max_score is None:
+            continue
+        total_score += score
+        total_max_score += max_score
+        has_score = True
+
+    if not has_score or total_max_score <= 0:
+        return None
+    return total_score, total_max_score
+
+
+def _format_score_number(value: float) -> str:
+    return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
+def _score_display(questions: list[dict[str, Any]]) -> str:
+    totals = _score_totals(questions)
+    if totals is None:
+        return "-"
+    total_score, total_max_score = totals
+    return f"{_format_score_number(total_score)}/{_format_score_number(total_max_score)}"
+
+
 def _correct_rate(questions: list[dict[str, Any]]) -> str:
-    if not questions:
+    totals = _score_totals(questions)
+    if totals is None:
         return "-"
-    judged = [item for item in questions if isinstance(item.get("is_correct"), bool)]
-    if not judged:
-        return "-"
-    correct = sum(1 for item in judged if item.get("is_correct") is True)
-    return f"{correct / len(judged):.0%}"
+    total_score, total_max_score = totals
+    return f"{total_score / total_max_score:.0%}"
 
 
 def _stringify_detail(value: Any, default: str = "暂无") -> str:
@@ -90,7 +127,7 @@ def _build_report(result: dict[str, Any]) -> str:
         "",
         f"- 任务ID：{result.get('task_id', '-')}",
         f"- 状态：{STATUS_LABELS.get(result.get('status'), result.get('status', '-'))}",
-        f"- 总分：{result.get('score', '-')}",
+        f"- 总分：{_score_display(result.get('questions', []))}",
         f"- 正确率：{_correct_rate(result.get('questions', []))}",
         f"- 识别题数：{len(result.get('paper_cut_questions') or result.get('questions', []))}",
         f"- 批注图：{result.get('annotated_image_path') or '暂无'}",
@@ -407,11 +444,12 @@ def _task_rows() -> list[dict[str, Any]]:
     known_ids = set()
     for item in list_tasks():
         known_ids.add(item["task_id"])
+        result = load_result(item["task_id"])
         rows.append(
             {
                 "任务ID": item["task_id"],
                 "状态": STATUS_LABELS.get(item.get("status"), item.get("status")),
-                "分数": item.get("score", "-"),
+                "分数": _score_display(result.get("questions", [])) if result else "-",
                 "创建时间": item.get("created_at", "-"),
                 "更新时间": item.get("updated_at", "-"),
             }
@@ -425,7 +463,7 @@ def _task_rows() -> list[dict[str, Any]]:
             {
                 "任务ID": task_id,
                 "状态": STATUS_LABELS.get(result.get("status"), result.get("status")),
-                "分数": result.get("score", "-"),
+                "分数": _score_display(result.get("questions", [])),
                 "创建时间": result.get("saved_at", "-"),
                 "更新时间": result.get("finished_at", result.get("saved_at", "-")),
             }
@@ -444,7 +482,7 @@ def _show_result(task_id: str) -> None:
     question_count = len(result.get("paper_cut_questions") or result.get("questions", [])) if result else "-"
     col_a, col_b, col_c, col_d = st.columns(4)
     col_a.metric("状态", status_text)
-    col_b.metric("总分", result.get("score", "-") if result else status.get("score", "-"))
+    col_b.metric("总分", _score_display(result.get("questions", [])) if result else "-")
     col_c.metric("正确率", _correct_rate(result.get("questions", [])) if result else "-")
     col_d.metric("识别题数", question_count)
 

@@ -210,7 +210,7 @@ def _derive_answers_prompt(ocr_result: dict[str, Any]) -> str:
 你的任务（只做这些，不要评分）：
 1. 仔细阅读每道题，明确题目在问什么。
 2. 独立计算/推导出标准正确答案。不要参考 student_answer_area。
-3. 按题目难度和步骤复杂度分配满分值（所有题目 max_score 合计约 100 分）。
+3. 按题目难度和步骤复杂度分配满分值，所有题目的 max_score 之和即为卷面总分。
 4. 给出简明的解题步骤和涉及的知识点。
 
 重要规则：
@@ -304,8 +304,7 @@ def _grade_prompt(
 4. **正确的题目**：is_correct=true，score=max_score，deduction_reason=""，comment 正向鼓励
 5. **错误的题目**：is_correct=false，score<max_score，deduction_reason 写清扣分原因
 6. **不确定的题目**：OCR 不清或学生作答无法辨认时降低 confidence，uncertain_reason 说明原因，且不能给满分
-7. **总分**：使用 0-100 分制，score_breakdown 要写明每题得分和总分构成
-8. **只返回 JSON**，不要输出 Markdown、代码块或解释文字。
+7. **总分必须等于逐题得分之和**：score 字段的值必须恰好等于所有题目 score 之和。例如第1题得 30、第2题得 45，则 score 必须是 75。score_breakdown 格式如"第1题 30/40，第2题 45/60，总分 75/100"。
 
 === OCR 原文（辅助理解） ===
 
@@ -379,6 +378,7 @@ def _grade_consistency_retry_prompt(
         "定向修正下列矛盾后返回完整 JSON。不要沿用矛盾字段；不要输出 Markdown 或解释文字。\n"
         f"{issue_text}\n\n"
         "修正规则：\n"
+        "- 总分 score 必须恰好等于所有题目 score 之和\n"
         "- 有扣分原因或不确定原因时不能满分\n"
         "- 指出错误时 is_correct 必须为 false\n"
         "- is_correct 为 true 时必须满分且 deduction_reason/uncertain_reason 为空\n"
@@ -448,24 +448,37 @@ def _parse_derived_answers(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _normalize_correction(payload: dict[str, Any]) -> dict[str, Any]:
-    """标准化「批改评分」阶段的 LLM 返回。"""
+    """标准化「批改评分」阶段的 LLM 返回。
+
+    总分以逐题得分之和为准，不信任 LLM 声明的 score 字段。
+    满分由阶段一的 max_score 决定，不强制为 100。
+    """
     questions = payload.get("questions")
     if not isinstance(questions, list):
         questions = []
     questions = [item for item in questions if isinstance(item, dict)]
 
-    score = payload.get("score", 0)
-    try:
-        score = int(score)
-    except (TypeError, ValueError):
-        score = 0
+    # 从逐题得分重算总分（LLM 定的满分是多少就是多少）
+    total = sum(_to_int(q.get("score"), 0) for q in questions)
+
+    # 自动生成 score_breakdown（如果 LLM 没给或给的明显不对）
+    llm_breakdown = str(payload.get("score_breakdown", ""))
+    if llm_breakdown and "总分" in llm_breakdown:
+        score_breakdown = llm_breakdown
+    else:
+        parts = [
+            f"第{q.get('question_no', '?')}题 {_to_int(q.get('score'), 0)}/{_to_int(q.get('max_score'), 0)}"
+            for q in questions
+        ]
+        parts.append(f"总分 {total}/{sum(_to_int(q.get('max_score'), 0) for q in questions)}")
+        score_breakdown = "，".join(parts)
 
     return {
-        "score": max(0, min(100, score)),
+        "score": total,
         "summary": str(payload.get("summary", "")),
         "comments": str(payload.get("comments", "")),
         "suggestions": str(payload.get("suggestions", "")),
-        "score_breakdown": payload.get("score_breakdown", ""),
+        "score_breakdown": score_breakdown,
         "strengths": payload.get("strengths", []),
         "weaknesses": payload.get("weaknesses", []),
         "next_steps": payload.get("next_steps", []),
@@ -517,6 +530,15 @@ def _correction_consistency_issues(payload: dict[str, Any]) -> list[str]:
     questions = payload.get("questions")
     if not isinstance(questions, list):
         return issues
+
+    # 总分与逐题得分之和是否一致
+    declared_score = _to_int(payload.get("score"), 0)
+    per_question_sum = sum(_to_int(q.get("score"), 0) for q in questions if isinstance(q, dict))
+    if declared_score != per_question_sum:
+        issues.append(
+            f"总分 score={declared_score} 与逐题得分之和 {per_question_sum} 不一致，"
+            f"请确保逐题 score 加起来等于总分。"
+        )
 
     for index, item in enumerate(questions, start=1):
         if not isinstance(item, dict):

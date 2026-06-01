@@ -6,6 +6,7 @@ from llm_corrector import (
     _correction_consistency_issues,
     _derive_answers_prompt,
     _grade_prompt,
+    _normalize_correction,
     _parse_derived_answers,
     _prepare_questions_for_llm,
     _validate_correct_answers,
@@ -270,6 +271,72 @@ class LLMCorrectorInputTests(unittest.TestCase):
 
         issues = _validate_correct_answers(derived, correction)
         self.assertFalse(issues)
+
+    # ------------------------------------------------------------------
+    # 总分以逐题之和为准
+    # ------------------------------------------------------------------
+
+    def test_normalize_correction_recalculates_score(self):
+        """LLM 声明总分 90，但逐题之和是 75 → 以 75 为准"""
+        payload = {
+            "score": 90,
+            "questions": [
+                {"question_no": "1", "score": 30, "max_score": 50},
+                {"question_no": "2", "score": 45, "max_score": 50},
+            ],
+        }
+        result = _normalize_correction(payload)
+        self.assertEqual(result["score"], 75)
+        self.assertIn("总分 75/100", result["score_breakdown"])
+
+    def test_normalize_correction_total_not_forced_to_100(self):
+        """LLM 定的满分总和是 80，学生得了 60 → 总分就是 60"""
+        payload = {
+            "score": 100,  # LLM 乱写的
+            "questions": [
+                {"question_no": "1", "score": 30, "max_score": 40},
+                {"question_no": "2", "score": 30, "max_score": 40},
+            ],
+        }
+        result = _normalize_correction(payload)
+        self.assertEqual(result["score"], 60)
+        self.assertIn("总分 60/80", result["score_breakdown"])
+
+    def test_consistency_issues_catch_score_sum_mismatch(self):
+        """声明总分 80 但逐题之和是 70 → 检测到"""
+        issues = _correction_consistency_issues(
+            {
+                "score": 80,
+                "questions": [
+                    {"question_no": "1", "is_correct": True, "score": 30, "max_score": 50},
+                    {"question_no": "2", "is_correct": True, "score": 40, "max_score": 50},
+                ],
+            }
+        )
+        self.assertTrue(any("总分" in issue for issue in issues))
+
+    def test_grade_prompt_includes_score_sum_rule(self):
+        ocr_result = {"ocr_text": "", "questions": []}
+        derived = [
+            {
+                "question_no": "1",
+                "question_understanding": "口算 480÷60",
+                "correct_answer": "8",
+                "max_score": 40,
+                "solution_steps": [],
+                "knowledge_points": [],
+                "uncertain_note": "",
+            }
+        ]
+        prompt = _grade_prompt(ocr_result, derived)
+        self.assertIn("总分必须等于逐题得分之和", prompt)
+
+    def test_derive_prompt_no_longer_forces_100(self):
+        """阶段一 prompt 不再要求 max_score 合计约 100"""
+        ocr_result = {"ocr_text": "", "questions": []}
+        prompt = _derive_answers_prompt(ocr_result)
+        self.assertNotIn("合计约 100", prompt)
+        self.assertIn("max_score 之和即为卷面总分", prompt)
 
 
 if __name__ == "__main__":
