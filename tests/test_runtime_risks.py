@@ -114,13 +114,15 @@ class TaskSubmissionTests(unittest.TestCase):
                 previous_cleanup_at = runtime_cleanup._last_cleanup_at
                 runtime_cleanup._last_cleanup_at = 0.0
                 try:
-                    task_id = task_queue.submit_task(new_upload)
+                    task_id = task_queue.submit_task(new_upload, "alice")
                 finally:
                     runtime_cleanup._last_cleanup_at = previous_cleanup_at
 
             self.assertTrue(existing_upload.exists())
             self.assertTrue((upload_dir / f"{task_id}.jpg").exists())
-            self.assertEqual(local_queue.get_nowait()["task_id"], task_id)
+            queued_task = local_queue.get_nowait()
+            self.assertEqual(queued_task["task_id"], task_id)
+            self.assertEqual(queued_task["owner_username"], "alice")
 
 
 class RuntimePathTests(unittest.TestCase):

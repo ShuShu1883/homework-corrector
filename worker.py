@@ -39,7 +39,7 @@ def _create_annotation_image(
         return None
 
 
-def process_homework(task_id: str, image_path: str) -> dict[str, Any]:
+def process_homework(task_id: str, image_path: str, owner_username: str) -> dict[str, Any]:
     prepared = _prepare_ocr_image(task_id, image_path)
     ocr_result = recognize_question_split(prepared["image_path"], task_id=task_id)
     if ocr_result.get("question_count", 0) == 0:
@@ -52,6 +52,7 @@ def process_homework(task_id: str, image_path: str) -> dict[str, Any]:
 
     result = {
         "task_id": task_id,
+        "owner_username": owner_username,
         "status": "finished",
         "image_path": image_path,
         "image_preview_path": create_preview_image(image_path, task_id=task_id, suffix="original_preview"),

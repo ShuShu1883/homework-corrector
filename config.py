@@ -19,6 +19,7 @@ RESULT_DIR = RUNTIME_DIR / "results"
 PROCESSED_DIR = RUNTIME_DIR / "processed"
 DEBUG_DIR = RUNTIME_DIR / "debug"
 CUT_DIR = RUNTIME_DIR / "cuts"
+DATA_DIR = RUNTIME_DIR / "data"
 
 
 def _from_streamlit_secrets(name: str) -> Any | None:
@@ -61,3 +62,4 @@ def ensure_runtime_dirs() -> None:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
     CUT_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)

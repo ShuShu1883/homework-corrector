@@ -9,6 +9,7 @@ from typing import Any
 from PIL import Image, ImageOps
 import streamlit as st
 
+from auth import AuthValidationError, authenticate_user, register_user
 from config import UPLOAD_DIR, ensure_runtime_dirs
 from image_processing import create_preview_image, process_document_image
 from paper_cut_tencent import recognize_question_split
@@ -24,6 +25,66 @@ STATUS_LABELS = {
     "failed": "失败",
     "unknown": "未知",
 }
+
+
+def _current_username() -> str | None:
+    username = st.session_state.get("username")
+    return str(username) if username else None
+
+
+def _logout_session() -> None:
+    st.session_state.clear()
+
+
+def _register_from_form(username: str, password: str, password_confirmation: str) -> str:
+    if password != password_confirmation:
+        raise AuthValidationError("两次输入的密码不一致。")
+    return register_user(username, password)
+
+
+def _show_auth_page() -> None:
+    st.subheader("登录后使用")
+    st.caption("登录状态仅在当前页面会话中保留，刷新网页后需要重新登录。")
+    login_tab, register_tab = st.tabs(["登录", "注册"])
+
+    with login_tab:
+        with st.form("login_form"):
+            username = st.text_input("用户名", key="login_username")
+            password = st.text_input("密码", type="password", key="login_password")
+            submitted = st.form_submit_button("登录", type="primary", width="stretch")
+
+        if submitted:
+            try:
+                authenticated_username = authenticate_user(username, password)
+            except RuntimeError as exc:
+                st.error(str(exc))
+            else:
+                if authenticated_username:
+                    st.session_state["username"] = authenticated_username
+                    st.rerun()
+                else:
+                    st.error("用户名或密码错误。")
+
+    with register_tab:
+        st.warning("当前为简化账号系统，密码会保存在本地文件中。请勿使用其他网站的常用密码。")
+        with st.form("register_form"):
+            username = st.text_input("注册用户名", key="register_username")
+            password = st.text_input("注册密码", type="password", key="register_password")
+            password_confirmation = st.text_input(
+                "确认密码",
+                type="password",
+                key="register_password_confirmation",
+            )
+            submitted = st.form_submit_button("注册并登录", type="primary", width="stretch")
+
+        if submitted:
+            try:
+                registered_username = _register_from_form(username, password, password_confirmation)
+            except (AuthValidationError, RuntimeError) as exc:
+                st.error(str(exc))
+            else:
+                st.session_state["username"] = registered_username
+                st.rerun()
 
 
 def _uploaded_preview(uploaded_file: Any, max_side: int = 1100) -> Image.Image:
@@ -502,12 +563,12 @@ def _show_paper_cut_page() -> None:
 
 
 
-def _task_rows() -> list[dict[str, Any]]:
+def _task_rows(owner_username: str) -> list[dict[str, Any]]:
     rows = []
     known_ids = set()
-    for item in list_tasks():
+    for item in list_tasks(owner_username=owner_username):
         known_ids.add(item["task_id"])
-        result = load_result(item["task_id"])
+        result = load_result(item["task_id"], owner_username=owner_username)
         rows.append(
             {
                 "任务ID": item["task_id"],
@@ -518,7 +579,7 @@ def _task_rows() -> list[dict[str, Any]]:
             }
         )
 
-    for result in list_results():
+    for result in list_results(owner_username=owner_username):
         task_id = result.get("task_id")
         if not task_id or task_id in known_ids:
             continue
@@ -534,9 +595,13 @@ def _task_rows() -> list[dict[str, Any]]:
     return rows
 
 
-def _show_result(task_id: str) -> None:
-    status = get_task_status(task_id)
-    result = load_result(task_id)
+def _show_result(task_id: str, owner_username: str) -> None:
+    status = get_task_status(task_id, owner_username=owner_username)
+    result = load_result(task_id, owner_username=owner_username)
+
+    if status.get("status") == "unknown" and not result:
+        st.error("任务不存在，或你无权查看该任务。")
+        return
 
     st.subheader("任务详情")
     status_text = STATUS_LABELS.get(status.get("status"), status.get("status", "未知"))
@@ -634,16 +699,26 @@ def _show_result(task_id: str) -> None:
 def main() -> None:
     st.set_page_config(page_title="智能作业批改系统", layout="wide")
     ensure_runtime_dirs()
-    cleanup_runtime_files()
-    start_workers()
 
     st.title("中小学作业智能批改系统")
     st.caption("Streamlit + 任务队列 + 腾讯云切题 OCR + 大模型批改")
 
+    owner_username = _current_username()
+    if not owner_username:
+        _show_auth_page()
+        return
+
+    cleanup_runtime_files()
+    start_workers()
+
     with st.sidebar:
         st.header("导航")
+        st.caption(f"当前账号：{owner_username}")
         page = st.radio("页面", ["上传批改", "图片加工", "试卷切题", "任务列表", "项目说明"], label_visibility="collapsed")
         if st.button("刷新状态", width="stretch"):
+            st.rerun()
+        if st.button("退出登录", width="stretch"):
+            _logout_session()
             st.rerun()
 
     if page == "上传批改":
@@ -661,14 +736,14 @@ def main() -> None:
             st.image(_uploaded_preview(uploaded_file), caption="待批改作业", width="stretch")
 
         if st.button("提交批改任务", type="primary", disabled=uploaded_file is None):
-            task_id = submit_task(uploaded_file)
+            task_id = submit_task(uploaded_file, owner_username)
             st.session_state["selected_task_id"] = task_id
             st.success(f"任务已提交：{task_id}")
 
         selected_task_id = st.session_state.get("selected_task_id")
         if selected_task_id:
             st.divider()
-            _show_result(selected_task_id)
+            _show_result(selected_task_id, owner_username)
 
     elif page == "图片加工":
         _show_image_processing_page()
@@ -677,7 +752,7 @@ def main() -> None:
         _show_paper_cut_page()
 
     elif page == "任务列表":
-        rows = _task_rows()
+        rows = _task_rows(owner_username)
         if not rows:
             st.info("暂无任务。")
             return
@@ -686,7 +761,7 @@ def main() -> None:
         task_ids = [row["任务ID"] for row in rows]
         selected = st.selectbox("选择任务查看详情", task_ids)
         if selected:
-            _show_result(selected)
+            _show_result(selected, owner_username)
 
     else:
         st.markdown(

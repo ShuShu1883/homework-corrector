@@ -10,6 +10,7 @@ processed/*
 debug/*
 cuts/*
 output/
+data/
 !uploads/.gitkeep
 !results/.gitkeep
 !processed/.gitkeep

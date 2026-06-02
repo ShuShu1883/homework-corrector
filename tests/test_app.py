@@ -4,12 +4,15 @@ from unittest.mock import patch
 from app import (
     _build_report,
     _correct_rate,
+    _logout_session,
     _paper_cut_question_by_no,
     _question_by_no,
     _question_options,
+    _register_from_form,
     _score_display,
     _task_rows,
 )
+from auth import AuthValidationError
 
 
 class ScoreDisplayTests(unittest.TestCase):
@@ -80,9 +83,20 @@ class ScoreDisplayTests(unittest.TestCase):
                 ],
             ),
         ):
-            rows = _task_rows()
+            rows = _task_rows("alice")
 
         self.assertEqual(rows[0]["分数"], "30/40")
+
+    def test_register_form_rejects_mismatched_passwords(self):
+        with self.assertRaises(AuthValidationError):
+            _register_from_form("alice", "secret1", "secret2")
+
+    def test_logout_clears_session_state(self):
+        state = {"username": "alice", "selected_task_id": "demo"}
+        with patch("app.st.session_state", state):
+            _logout_session()
+
+        self.assertEqual(state, {})
 
     def test_question_options_keep_result_order(self):
         questions = [

@@ -13,7 +13,8 @@
 - OCR 模块：腾讯云试卷切题 OCR + 阿里云 OCR HTTP 适配器
 - 智能批改：OpenAI-compatible Chat Completions API
 - 数据存储：本地 JSON 文件
-- 文件存储：项目运行目录下的 `uploads/`、`processed/`、`cuts/`、`debug/`、`results/` 目录，可通过 `APP_RUNTIME_DIR` 改到部署环境可写目录。
+- 账号系统：本地 JSON 文件 + Streamlit Session State
+- 文件存储：项目运行目录下的 `uploads/`、`processed/`、`cuts/`、`debug/`、`results/`、`data/` 目录，可通过 `APP_RUNTIME_DIR` 改到部署环境可写目录。
 
 系统采用生产者-消费者模型。用户上传图片后，前端立即生成任务 ID 并将任务放入队列。后台 worker 线程从队列中取出任务，依次执行腾讯云切题 OCR、大模型批改和结果保存。前端通过任务 ID 查询任务状态。为适配 Streamlit Cloud 这类临时磁盘环境，应用会定期递归清理 `uploads/`、`processed/`、`cuts/`、`debug/` 下超过保留期的临时文件，避免运行产物持续堆积；`results/` 会保留。
 
@@ -28,6 +29,13 @@
 - `llm_corrector.py`：大模型批改封装，对外只暴露 `correct_homework`。
 - `storage.py`：批改结果 JSON 保存和读取。
 - `config.py`：环境变量、`.env`、Streamlit Secrets 配置读取。
+- `auth.py`：简化账号注册、登录校验和本地 JSON 存储。
+
+## 登录系统
+
+系统支持用户注册、登录和退出。登录状态仅保存在当前 Streamlit 页面会话中，刷新网页后需要重新登录。新提交的批改任务会记录所属用户名，任务列表只展示当前用户自己的结果；升级前生成的不含用户名的历史结果不会在登录后的页面中展示。
+
+账号保存在 `APP_RUNTIME_DIR/data/users.json`。当前版本为了保持实现简单，密码以明文保存在本地文件中，只适合低风险、小规模部署。用户不应使用其他网站的常用密码。若面向真实用户长期运行，应升级为密码哈希和更完整的会话管理。
 
 ## 任务状态
 

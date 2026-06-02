@@ -74,27 +74,35 @@ def update_task_status(task_id: str, **updates: Any) -> None:
         current["updated_at"] = _now()
 
 
-def submit_task(image_file: Any) -> str:
+def submit_task(image_file: Any, owner_username: str) -> str:
     start_workers()
     cleanup_runtime_files(force=True)
+    owner_username = str(owner_username or "").strip().lower()
+    if not owner_username:
+        raise ValueError("任务必须关联登录用户。")
     task_id = str(uuid.uuid4())
     image_path = _save_upload(image_file, task_id)
     update_task_status(
         task_id,
         status="waiting",
         image_path=image_path,
+        owner_username=owner_username,
         error=None,
         result_path=None,
     )
-    _task_queue.put({"task_id": task_id, "image_path": image_path})
+    _task_queue.put({"task_id": task_id, "image_path": image_path, "owner_username": owner_username})
     return task_id
 
 
-def get_task_status(task_id: str) -> dict[str, Any]:
+def get_task_status(task_id: str, *, owner_username: str | None = None) -> dict[str, Any]:
     with _status_lock:
         status = dict(_task_status.get(task_id, {"task_id": task_id, "status": "unknown"}))
+    if owner_username is not None and status.get("owner_username") != owner_username:
+        status = {"task_id": task_id, "status": "unknown"}
 
-    result = load_result(task_id)
+    result = load_result(task_id, owner_username=owner_username)
+    if not result and status.get("status") in {"finished", "failed"}:
+        return {"task_id": task_id, "status": "unknown"}
     if result:
         status.update(
             {
@@ -108,10 +116,35 @@ def get_task_status(task_id: str) -> dict[str, Any]:
     return status
 
 
-def list_tasks() -> list[dict[str, Any]]:
+def list_tasks(*, owner_username: str | None = None) -> list[dict[str, Any]]:
     with _status_lock:
         tasks = [dict(item) for item in _task_status.values()]
+    if owner_username is not None:
+        tasks = [item for item in tasks if item.get("owner_username") == owner_username]
+    tasks = [
+        item
+        for item in tasks
+        if item.get("status") not in {"finished", "failed"}
+        or load_result(item["task_id"], owner_username=owner_username)
+    ]
     return sorted(tasks, key=lambda item: item.get("created_at", ""), reverse=True)
+
+
+def _failed_result(task_id: str, image_path: str, owner_username: str, error_message: str) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "owner_username": owner_username,
+        "status": "failed",
+        "image_path": image_path,
+        "ocr_text": "",
+        "questions": [],
+        "score": 0,
+        "summary": "",
+        "comments": "",
+        "suggestions": "",
+        "error": error_message,
+        "finished_at": _now(),
+    }
 
 
 def start_workers(max_workers: int | None = None) -> None:
@@ -141,9 +174,10 @@ def _worker_loop() -> None:
         task = _task_queue.get()
         task_id = task["task_id"]
         image_path = task["image_path"]
+        owner_username = task["owner_username"]
         try:
             update_task_status(task_id, status="running", error=None)
-            result = process_homework(task_id, image_path)
+            result = process_homework(task_id, image_path, owner_username)
             update_task_status(
                 task_id,
                 status="finished",
@@ -153,19 +187,7 @@ def _worker_loop() -> None:
             )
         except Exception as exc:
             error_message = str(exc) or exc.__class__.__name__
-            failed_result = {
-                "task_id": task_id,
-                "status": "failed",
-                "image_path": image_path,
-                "ocr_text": "",
-                "questions": [],
-                "score": 0,
-                "summary": "",
-                "comments": "",
-                "suggestions": "",
-                "error": error_message,
-                "finished_at": _now(),
-            }
+            failed_result = _failed_result(task_id, image_path, owner_username, error_message)
             save_result(task_id, failed_result)
             update_task_status(task_id, status="failed", error=error_message)
         finally:
