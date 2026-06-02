@@ -9,6 +9,7 @@ results/*
 processed/*
 debug/*
 cuts/*
+output/
 !uploads/.gitkeep
 !results/.gitkeep
 !processed/.gitkeep

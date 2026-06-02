@@ -8,10 +8,9 @@ from typing import Any
 
 from PIL import Image, ImageOps
 
-from config import BASE_DIR, PROCESSED_DIR, ensure_runtime_dirs, get_int_setting, get_setting
+from config import CUT_DIR, PROCESSED_DIR, ensure_runtime_dirs, get_int_setting, get_setting
 
 
-CUT_DIR = BASE_DIR / "cuts"
 MAX_IMAGE_BASE64_BYTES = 10 * 1024 * 1024
 DEFAULT_API_IMAGE_MAX_SIDE = 1800
 DEFAULT_API_IMAGE_JPEG_QUALITY = 86

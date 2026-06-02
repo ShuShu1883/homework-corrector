@@ -8,14 +8,29 @@ from config import CUT_DIR, DEBUG_DIR, PROCESSED_DIR, UPLOAD_DIR, ensure_runtime
 
 TRANSIENT_DIRS = (UPLOAD_DIR, PROCESSED_DIR, CUT_DIR, DEBUG_DIR)
 DEFAULT_MAX_AGE_HOURS = 24
-DEFAULT_MAX_FILES_PER_DIR = 120
 _last_cleanup_at = 0.0
 
 
 def _runtime_files(directory: Path) -> list[Path]:
     if not directory.exists():
         return []
-    return [path for path in directory.iterdir() if path.is_file() and path.name != ".gitkeep"]
+    return [path for path in directory.rglob("*") if path.is_file() and path.name != ".gitkeep"]
+
+
+def _remove_empty_subdirectories(directory: Path) -> None:
+    if not directory.exists():
+        return
+
+    subdirectories = sorted(
+        (path for path in directory.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for path in subdirectories:
+        try:
+            path.rmdir()
+        except OSError:
+            pass
 
 
 def cleanup_runtime_files(*, force: bool = False) -> dict[str, int]:
@@ -29,7 +44,6 @@ def cleanup_runtime_files(*, force: bool = False) -> dict[str, int]:
 
     _last_cleanup_at = now
     max_age_seconds = max(1, get_int_setting("CLEANUP_MAX_AGE_HOURS", DEFAULT_MAX_AGE_HOURS)) * 3600
-    max_files_per_dir = max(1, get_int_setting("CLEANUP_MAX_FILES_PER_DIR", DEFAULT_MAX_FILES_PER_DIR))
 
     deleted = 0
     scanned = 0
@@ -45,27 +59,6 @@ def cleanup_runtime_files(*, force: bool = False) -> dict[str, int]:
             except OSError:
                 pass
 
-        remaining = sorted(_runtime_files(directory), key=lambda path: path.stat().st_mtime, reverse=True)
-        for path in remaining[max_files_per_dir:]:
-            try:
-                path.unlink()
-                deleted += 1
-            except OSError:
-                pass
+        _remove_empty_subdirectories(directory)
 
-    return {"deleted": deleted, "scanned": scanned}
-
-
-def clear_runtime_files() -> dict[str, int]:
-    ensure_runtime_dirs()
-    deleted = 0
-    scanned = 0
-    for directory in TRANSIENT_DIRS:
-        for path in _runtime_files(directory):
-            scanned += 1
-            try:
-                path.unlink()
-                deleted += 1
-            except OSError:
-                pass
     return {"deleted": deleted, "scanned": scanned}

@@ -6,10 +6,10 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any
 
 from config import UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
-from runtime_cleanup import cleanup_runtime_files, clear_runtime_files
+from runtime_cleanup import cleanup_runtime_files
 from storage import load_result, save_result
 
 
@@ -76,7 +76,6 @@ def update_task_status(task_id: str, **updates: Any) -> None:
 
 def submit_task(image_file: Any) -> str:
     start_workers()
-    clear_runtime_files()
     cleanup_runtime_files(force=True)
     task_id = str(uuid.uuid4())
     image_path = _save_upload(image_file, task_id)

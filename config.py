@@ -13,7 +13,7 @@ try:
 except Exception:
     pass
 
-RUNTIME_DIR = Path(os.getenv("APP_RUNTIME_DIR", BASE_DIR)).resolve()
+RUNTIME_DIR = Path(os.getenv("APP_RUNTIME_DIR") or BASE_DIR).resolve()
 UPLOAD_DIR = RUNTIME_DIR / "uploads"
 RESULT_DIR = RUNTIME_DIR / "results"
 PROCESSED_DIR = RUNTIME_DIR / "processed"

@@ -8,16 +8,13 @@ from typing import Any
 
 import requests
 
-from config import BASE_DIR, get_int_setting, get_setting
+from config import DEBUG_DIR, get_int_setting, get_setting
 
 
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com"
 DEFAULT_LLM_MODEL = "deepseek-v4-pro"
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_CONSISTENCY_RETRIES = 2
-
-DEBUG_DIR = BASE_DIR / "debug"
-
 
 HTTP_ERROR_MESSAGES = {
     401: "大模型认证失败，请检查 LLM_API_KEY 或 DEEPSEEK_API_KEY 是否正确。",

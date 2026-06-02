@@ -12,7 +12,7 @@ import streamlit as st
 from config import UPLOAD_DIR, ensure_runtime_dirs
 from image_processing import create_preview_image, process_document_image
 from paper_cut_tencent import recognize_question_split
-from runtime_cleanup import cleanup_runtime_files, clear_runtime_files
+from runtime_cleanup import cleanup_runtime_files
 from storage import list_results, load_result
 from task_queue import get_task_status, list_tasks, start_workers, submit_task
 
@@ -314,25 +314,25 @@ def _show_image_processing_page() -> None:
         st.warning(result.get("message"))
     else:
         st.error(result.get("message") or "图片处理失败。")
-        st.image(original_path, caption="原图", use_container_width=True)
+        st.image(original_path, caption="原图", width="stretch")
         return
 
     columns = st.columns(3)
     with columns[0]:
         st.markdown("#### 原图")
-        st.image(original_preview_path, use_container_width=True)
+        st.image(original_preview_path, width="stretch")
 
     with columns[1]:
         st.markdown("#### 透视校正")
         warped_path = result.get("warped_path")
         if warped_path and Path(warped_path).exists():
-            st.image(warped_preview_path or warped_path, use_container_width=True)
+            st.image(warped_preview_path or warped_path, width="stretch")
 
     with columns[2]:
         st.markdown(f"#### {mode_labels.get(result.get('enhance_mode'), '清晰图')}")
         enhanced_path = result.get("enhanced_path")
         if enhanced_path and Path(enhanced_path).exists():
-            st.image(enhanced_preview_path or enhanced_path, use_container_width=True)
+            st.image(enhanced_preview_path or enhanced_path, width="stretch")
 
     if result.get("corners"):
         with st.expander("检测到的文档四角", expanded=False):
@@ -342,7 +342,7 @@ def _show_image_processing_page() -> None:
     if debug_path and Path(debug_path).exists():
         debug_preview_path = create_preview_image(debug_path, suffix="debug_preview")
         with st.expander("边界检测调试图", expanded=False):
-            st.image(debug_preview_path, use_container_width=True)
+            st.image(debug_preview_path, width="stretch")
 
     enhanced_path = result.get("enhanced_path")
     if enhanced_path and Path(enhanced_path).exists():
@@ -388,7 +388,6 @@ def _show_paper_cut_page() -> None:
         enable_image_crop = st.toggle("腾讯云二次切边/弯曲矫正", value=False)
 
     if st.button("调用腾讯云切题", type="primary"):
-        clear_runtime_files()
         cleanup_runtime_files(force=True)
         st.session_state.pop("paper_cut_result", None)
         st.session_state.pop("paper_cut_original_path", None)
@@ -437,7 +436,7 @@ def _show_paper_cut_page() -> None:
 
     result = st.session_state.get("paper_cut_result")
     if not result:
-        st.image(_uploaded_preview(uploaded_file), caption="待切题试卷", use_container_width=True)
+        st.image(_uploaded_preview(uploaded_file), caption="待切题试卷", width="stretch")
         return
 
     original_path = st.session_state.get("paper_cut_original_path")
@@ -447,11 +446,11 @@ def _show_paper_cut_page() -> None:
     with preview_cols[0]:
         st.markdown("#### 原图")
         if original_preview_path and Path(original_preview_path).exists():
-            st.image(original_preview_path, use_container_width=True)
+            st.image(original_preview_path, width="stretch")
     with preview_cols[1]:
         st.markdown("#### 增强后送检图")
         if api_preview_path and Path(api_preview_path).exists():
-            st.image(api_preview_path, use_container_width=True)
+            st.image(api_preview_path, width="stretch")
 
     processing = result.get("processing")
     if processing:
@@ -476,7 +475,7 @@ def _show_paper_cut_page() -> None:
         with st.expander(title, expanded=False):
             crop_path = item.get("crop_path")
             if crop_path and Path(crop_path).exists():
-                st.image(crop_path, caption="题目区域", use_container_width=True)
+                st.image(crop_path, caption="题目区域", width="stretch")
             st.text_area(
                 "识别文字",
                 item.get("text", ""),
@@ -644,7 +643,7 @@ def main() -> None:
     with st.sidebar:
         st.header("导航")
         page = st.radio("页面", ["上传批改", "图片加工", "试卷切题", "任务列表", "项目说明"], label_visibility="collapsed")
-        if st.button("刷新状态", use_container_width=True):
+        if st.button("刷新状态", width="stretch"):
             st.rerun()
 
     if page == "上传批改":
@@ -659,7 +658,7 @@ def main() -> None:
                 st.session_state["correction_file_signature"] = file_signature
                 st.session_state.pop("selected_task_id", None)
 
-            st.image(_uploaded_preview(uploaded_file), caption="待批改作业", use_container_width=True)
+            st.image(_uploaded_preview(uploaded_file), caption="待批改作业", width="stretch")
 
         if st.button("提交批改任务", type="primary", disabled=uploaded_file is None):
             task_id = submit_task(uploaded_file)
@@ -683,7 +682,7 @@ def main() -> None:
             st.info("暂无任务。")
             return
 
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
         task_ids = [row["任务ID"] for row in rows]
         selected = st.selectbox("选择任务查看详情", task_ids)
         if selected:
