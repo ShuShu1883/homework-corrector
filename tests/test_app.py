@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app import (
     _build_report,
@@ -11,6 +11,7 @@ from app import (
     _is_mobile_user_agent,
     _logout_session,
     _paper_cut_question_by_no,
+    _project_description_markdown,
     _question_by_no,
     _question_options,
     _register_from_form,
@@ -18,8 +19,11 @@ from app import (
     _save_processing_upload,
     _score_display,
     _select_image_input,
+    _show_image_processing_page,
+    _show_paper_cut_page,
     _task_rows,
     _uploaded_file_signature,
+    _write_question_detail,
 )
 from auth import AuthValidationError
 from ui_theme import build_task_card_html, status_badge_html, task_card_button_key
@@ -212,6 +216,132 @@ class ScoreDisplayTests(unittest.TestCase):
             _result_error_message(status, result),
             "腾讯云切题 OCR 未识别到题目区域。",
         )
+
+    def test_question_detail_does_not_render_confidence_metric(self):
+        columns = [MagicMock(), MagicMock()]
+        with (
+            patch("app.st.columns", return_value=columns) as st_columns,
+            patch("app.st.markdown"),
+            patch("app.st.write"),
+            patch("app._write_detail"),
+        ):
+            _write_question_detail(
+                {"question_no": "3", "score": 0, "max_score": 10, "confidence": "high"},
+                {},
+            )
+
+        st_columns.assert_called_once_with(2)
+        metric_labels = [call.args[0] for column in columns for call in column.metric.call_args_list]
+        self.assertEqual(metric_labels, ["本题得分", "本题满分"])
+        self.assertNotIn("可信度", metric_labels)
+
+    def test_image_processing_page_only_shows_enhanced_image(self):
+        upload = FakeUpload(b"image", name="demo.jpg", size=5)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            enhanced_path = Path(temp_dir) / "enhanced.png"
+            enhanced_path.write_bytes(b"enhanced")
+
+            with (
+                patch("app.render_page_intro"),
+                patch("app.render_steps"),
+                patch("app._current_username", return_value="alice"),
+                patch("app._select_image_input", return_value=(upload, "upload")),
+                patch("app.st.segmented_control", return_value="strong"),
+                patch("app._save_processing_upload", return_value=str(Path(temp_dir) / "original.jpg")),
+                patch(
+                    "app.process_document_image",
+                    return_value={
+                        "status": "success",
+                        "message": "ok",
+                        "enhanced_path": str(enhanced_path),
+                        "enhance_mode": "strong",
+                        "warped_path": str(Path(temp_dir) / "warped.png"),
+                        "corners": [{"x": 1, "y": 1}],
+                        "debug_path": str(Path(temp_dir) / "debug.png"),
+                    },
+                ),
+                patch("app.create_preview_image", return_value=str(enhanced_path)),
+                patch("app.st.success"),
+                patch("app.st.markdown") as markdown,
+                patch("app.st.image") as image,
+                patch("app.st.expander") as expander,
+                patch("app.st.download_button"),
+            ):
+                _show_image_processing_page()
+
+        rendered_markdown = [call.args[0] for call in markdown.call_args_list]
+        self.assertIn("#### 强力清晰", rendered_markdown)
+        self.assertNotIn("#### 原图", rendered_markdown)
+        self.assertNotIn("#### 透视校正", rendered_markdown)
+        image.assert_called_once()
+        expander.assert_not_called()
+
+    def test_image_processing_failure_does_not_show_original_image(self):
+        upload = FakeUpload(b"image", name="demo.jpg", size=5)
+        with (
+            patch("app.render_page_intro"),
+            patch("app.render_steps"),
+            patch("app._current_username", return_value="alice"),
+            patch("app._select_image_input", return_value=(upload, "upload")),
+            patch("app.st.segmented_control", return_value="strong"),
+            patch("app._save_processing_upload", return_value="original.jpg"),
+            patch(
+                "app.process_document_image",
+                return_value={"status": "failed", "message": "bad image"},
+            ),
+            patch("app.create_preview_image"),
+            patch("app.st.error"),
+            patch("app.st.image") as image,
+        ):
+            _show_image_processing_page()
+
+        image.assert_not_called()
+
+    def test_paper_cut_page_only_shows_enhanced_preview_before_results(self):
+        upload = FakeUpload(b"paper", name="paper.jpg", size=5)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            api_preview_path = Path(temp_dir) / "api_preview.png"
+            api_preview_path.write_bytes(b"api")
+            state = {
+                "paper_cut_file_signature": "same",
+                "paper_cut_result": {
+                    "task_id": "task-1",
+                    "request_id": "req-1",
+                    "question_count": 0,
+                    "questions": [],
+                    "api_preview_path": str(api_preview_path),
+                    "original_preview_path": str(Path(temp_dir) / "original_preview.png"),
+                },
+            }
+
+            with (
+                patch("app.st.session_state", state),
+                patch("app.render_page_intro"),
+                patch("app._select_image_input", return_value=(upload, "upload")),
+                patch("app._uploaded_file_signature", return_value="same"),
+                patch("app.st.columns", return_value=[MagicMock(), MagicMock()]),
+                patch("app.st.toggle", return_value=True),
+                patch("app.st.button", return_value=False),
+                patch("app.st.markdown") as markdown,
+                patch("app.st.image") as image,
+                patch("app.st.caption"),
+                patch("app.st.download_button"),
+            ):
+                _show_paper_cut_page()
+
+        rendered_markdown = [call.args[0] for call in markdown.call_args_list]
+        self.assertIn("#### 增强后送检图", rendered_markdown)
+        self.assertIn("#### 切题结果", rendered_markdown)
+        self.assertNotIn("#### 原图", rendered_markdown)
+        image.assert_called_once_with(str(api_preview_path), width="stretch")
+
+    def test_project_description_uses_formal_copy_without_demo_terms(self):
+        text = _project_description_markdown()
+
+        self.assertIn("### 系统定位", text)
+        self.assertIn("### 部署说明", text)
+        for forbidden in ["测试环境", "演示配置", "mock", "课程设计", "本地演示"]:
+            self.assertNotIn(forbidden, text)
 
     def test_clearing_mobile_capture_state_removes_old_phone_photo(self):
         state = {

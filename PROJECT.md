@@ -10,7 +10,7 @@
 
 - 前端界面：Streamlit
 - 后台任务：Python `queue.Queue` + 后台线程池
-- OCR 模块：腾讯云试卷切题 OCR + 阿里云 OCR HTTP 适配器
+- OCR 模块：腾讯云试卷切题 OCR
 - 智能批改：OpenAI-compatible Chat Completions API
 - 数据存储：本地 JSON 文件
 - 账号系统：本地 JSON 文件 + Streamlit Session State
@@ -25,7 +25,6 @@
 - `worker.py`：单个作业任务的完整处理流程。
 - `image_processing.py`：文档图片加工模块，负责文档边界检测、透视校正和文字增强。
 - `paper_cut_tencent.py`：腾讯云试卷切题 OCR 模块，调用 `QuestionSplitOCR` 并按返回坐标裁出题目小图。
-- `ocr_aliyun.py`：阿里云 OCR 调用封装，保留普通 OCR 适配能力。
 - `llm_corrector.py`：大模型批改封装，对外只暴露 `correct_homework`。
 - `storage.py`：批改结果 JSON 保存和读取。
 - `config.py`：环境变量、`.env`、Streamlit Secrets 配置读取。

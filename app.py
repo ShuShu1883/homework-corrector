@@ -494,10 +494,9 @@ def _write_overview(result: dict[str, Any]) -> None:
 def _write_question_detail(item: dict[str, Any], paper_cut_question: dict[str, Any]) -> None:
     badge = _question_display_status(item)
     st.markdown(f"#### 第 {item.get('question_no', '-')} 题 · {badge}")
-    cols = st.columns(3)
+    cols = st.columns(2)
     cols[0].metric("本题得分", item.get("score", "-"))
     cols[1].metric("本题满分", item.get("max_score", "-"))
-    cols[2].metric("可信度", item.get("confidence", "-"))
 
     crop_path = paper_cut_question.get("crop_path")
     if crop_path and Path(crop_path).exists():
@@ -631,12 +630,6 @@ def _show_image_processing_page() -> None:
 
     original_path = _save_processing_upload(uploaded_file, source=image_source or "upload")
     result = process_document_image(original_path, enhance_mode=selected_mode or "strong")
-    original_preview_path = create_preview_image(original_path, suffix="original_preview")
-    warped_preview_path = (
-        create_preview_image(result["warped_path"], suffix="warped_preview")
-        if result.get("warped_path")
-        else None
-    )
     enhanced_preview_path = (
         create_preview_image(result["enhanced_path"], suffix="enhanced_preview")
         if result.get("enhanced_path")
@@ -650,38 +643,12 @@ def _show_image_processing_page() -> None:
         st.warning(result.get("message"))
     else:
         st.error(result.get("message") or "图片处理失败。")
-        st.image(original_path, caption="原图", width="stretch")
         return
-
-    columns = st.columns(3)
-    with columns[0]:
-        st.markdown("#### 原图")
-        st.image(original_preview_path, width="stretch")
-
-    with columns[1]:
-        st.markdown("#### 透视校正")
-        warped_path = result.get("warped_path")
-        if warped_path and Path(warped_path).exists():
-            st.image(warped_preview_path or warped_path, width="stretch")
-
-    with columns[2]:
-        st.markdown(f"#### {mode_labels.get(result.get('enhance_mode'), '清晰图')}")
-        enhanced_path = result.get("enhanced_path")
-        if enhanced_path and Path(enhanced_path).exists():
-            st.image(enhanced_preview_path or enhanced_path, width="stretch")
-
-    if result.get("corners"):
-        with st.expander("检测到的文档四角", expanded=False):
-            st.json(result["corners"])
-
-    debug_path = result.get("debug_path")
-    if debug_path and Path(debug_path).exists():
-        debug_preview_path = create_preview_image(debug_path, suffix="debug_preview")
-        with st.expander("边界检测调试图", expanded=False):
-            st.image(debug_preview_path, width="stretch")
 
     enhanced_path = result.get("enhanced_path")
     if enhanced_path and Path(enhanced_path).exists():
+        st.markdown(f"#### {mode_labels.get(result.get('enhance_mode'), '清晰图')}")
+        st.image(enhanced_preview_path or enhanced_path, width="stretch")
         st.download_button(
             "下载清晰增强图",
             data=Path(enhanced_path).read_bytes(),
@@ -780,32 +747,10 @@ def _show_paper_cut_page() -> None:
         st.image(_uploaded_preview(uploaded_file), caption="待切题试卷", width="stretch")
         return
 
-    original_path = st.session_state.get("paper_cut_original_path")
-    original_preview_path = result.get("original_preview_path") or original_path
     api_preview_path = result.get("api_preview_path") or result.get("image_path")
-    preview_cols = st.columns(2)
-    with preview_cols[0]:
-        st.markdown("#### 原图")
-        if original_preview_path and Path(original_preview_path).exists():
-            st.image(original_preview_path, width="stretch")
-    with preview_cols[1]:
-        st.markdown("#### 增强后送检图")
-        if api_preview_path and Path(api_preview_path).exists():
-            st.image(api_preview_path, width="stretch")
-
-    processing = result.get("processing")
-    if processing:
-        with st.expander("图片增强信息", expanded=False):
-            st.json(
-                {
-                    "status": processing.get("status"),
-                    "message": processing.get("message"),
-                    "enhance_mode": processing.get("enhance_mode"),
-                    "corners": processing.get("corners"),
-                    "enhanced_path": processing.get("enhanced_path"),
-                    "api_image_meta": result.get("api_image_meta"),
-                }
-            )
+    st.markdown("#### 增强后送检图")
+    if api_preview_path and Path(api_preview_path).exists():
+        st.image(api_preview_path, width="stretch")
 
     st.markdown("#### 切题结果")
     st.caption(f"RequestId: {result.get('request_id') or '-'}")
@@ -841,6 +786,38 @@ def _show_paper_cut_page() -> None:
         mime="application/json",
     )
 
+
+def _project_description_markdown() -> str:
+    return """
+### 系统定位
+
+本系统面向中小学作业批改场景，提供从作业图片采集、试卷切题、OCR 识别到大模型批改反馈的一体化流程。教师或学生上传作业图片后，系统会自动进入后台队列处理，并在页面中展示批改进度和结果。
+
+### 核心能力
+
+- 支持图片上传、电脑摄像头拍照和手机扫码上传三种采集方式。
+- 自动增强作业图片清晰度，提升后续 OCR 识别稳定性。
+- 调用腾讯云切题 OCR 识别题目区域，并保留题目裁切结果用于核对。
+- 结合大模型生成逐题评分、错因分析、订正建议和整体学习反馈。
+- 按登录账号隔离任务列表和历史批改结果，避免不同用户互相看到数据。
+
+### 使用流程
+
+用户登录后可在“上传批改”页面提交作业图片，任务进入后台队列后可以继续浏览其他页面；在“任务列表”中查看处理状态，任务完成后进入详情页查看总分、正确率、批注图和逐题反馈。“图片加工”和“试卷切题”页面提供独立的图像增强与题目识别能力，适合在正式批改前检查图片质量。
+
+### 部署说明
+
+系统部署时需要提供可持久化的运行目录，用于保存账号文件、任务结果和临时图片；同时需要配置 OCR 服务和大模型服务的访问凭据。摄像头拍照能力由浏览器权限控制，线上环境建议使用 HTTPS，以便电脑和手机浏览器正常调用相机或系统图片选择器。
+
+### 数据边界
+
+账号、任务状态和结果文件保存在应用运行目录中。系统按登录账号展示对应任务，不主动公开其他用户的数据。当前版本适合低风险、小规模使用场景；若用于长期公开服务，应进一步接入更完整的账号安全、存储备份、访问控制和运维监控机制。
+"""
+
+
+def _show_project_page() -> None:
+    render_page_intro("项目说明", "面向线上使用的作业智能批改与图像处理系统。", kicker="About this project ✦")
+    st.markdown(_project_description_markdown())
 
 
 def _task_rows(owner_username: str) -> list[dict[str, Any]]:
@@ -1072,40 +1049,7 @@ def main() -> None:
             _show_result(str(selected_task_id), owner_username)
 
     else:
-        render_page_intro("项目说明", "了解当前系统的运行结构、适用范围和演示配置。", kicker="About this project ✦")
-        st.markdown(
-            """
-### 项目架构
-
-本系统采用生产者-消费者模型。前端负责提交作业批改任务，内存队列负责缓存请求，后台线程池负责并发执行 OCR 识别和大模型批改，结果以 JSON 文件保存。
-
-### 适用范围
-
-当前版本适合课程设计、本地演示和小规模部署。生产环境可升级为 Redis/Celery、数据库和对象存储，以支持多进程、多节点和更高并发。
-
-### 演示配置
-
-主批改流程需要腾讯云切题 OCR 密钥。若只想演示批改展示，可将大模型设置为 mock：
-
-```text
-TENCENT_SECRET_ID=你的腾讯云SecretId
-TENCENT_SECRET_KEY=你的腾讯云SecretKey
-TENCENT_OCR_REGION=ap-guangzhou
-LLM_MODE=mock
-```
-
-如果要调用 DeepSeek V4 Pro 做真实批改，请在本地 `.env` 或 Streamlit Secrets 中配置：
-
-```text
-LLM_MODE=api
-LLM_API_KEY=你的DeepSeek API Key
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-pro
-LLM_MAX_TOKENS=4096
-DEEPSEEK_THINKING=disabled
-```
-"""
-        )
+        _show_project_page()
 
 
 if __name__ == "__main__":
