@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(BASE_DIR / ".env")
+    load_dotenv(BASE_DIR / ".env", encoding="utf-8-sig")
 except Exception:
     pass
 
