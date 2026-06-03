@@ -26,6 +26,7 @@ from app import (
     _write_question_detail,
 )
 from auth import AuthValidationError
+from image_processing import _annotation_font_candidates
 from ui_theme import build_task_card_html, status_badge_html, task_card_button_key
 
 
@@ -342,6 +343,12 @@ class ScoreDisplayTests(unittest.TestCase):
         self.assertIn("### 部署说明", text)
         for forbidden in ["测试环境", "演示配置", "mock", "课程设计", "本地演示"]:
             self.assertNotIn(forbidden, text)
+
+    def test_annotation_font_candidates_prioritize_cjk_fonts(self):
+        candidates = [str(path).replace("\\", "/") for path in _annotation_font_candidates()]
+
+        self.assertIn("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", candidates)
+        self.assertFalse(any("DejaVuSans" in path for path in candidates))
 
     def test_clearing_mobile_capture_state_removes_old_phone_photo(self):
         state = {

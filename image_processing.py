@@ -169,16 +169,22 @@ def create_preview_image(image_path: str, task_id: str | None = None, suffix: st
     return str(preview_path)
 
 
-def _annotation_font(size: int) -> ImageFont.ImageFont:
-    candidates = [
+def _annotation_font_candidates() -> list[Path]:
+    return [
         Path("C:/Windows/Fonts/msyh.ttc"),
         Path("C:/Windows/Fonts/simhei.ttf"),
         Path("C:/Windows/Fonts/simsun.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
         Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc"),
         Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc"),
     ]
-    for path in candidates:
+
+
+def _annotation_font(size: int) -> ImageFont.ImageFont:
+    for path in _annotation_font_candidates():
         if path.exists():
             try:
                 return ImageFont.truetype(str(path), size)
