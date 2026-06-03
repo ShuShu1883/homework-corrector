@@ -5,17 +5,37 @@ import hashlib
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode, urlparse, urlunparse
 
 from PIL import Image, ImageOps
+import qrcode
 import streamlit as st
 
 from auth import AuthValidationError, authenticate_user, register_user
 from config import UPLOAD_DIR, ensure_runtime_dirs
 from image_processing import create_preview_image, process_document_image
+from mobile_capture import (
+    MobileCaptureError,
+    create_mobile_capture,
+    get_mobile_capture_image,
+    get_mobile_capture_status,
+    save_mobile_capture_upload,
+)
 from paper_cut_tencent import recognize_question_split
 from runtime_cleanup import cleanup_runtime_files
 from storage import list_results, load_result
 from task_queue import get_task_status, list_tasks, start_workers, submit_task
+from ui_theme import (
+    apply_app_theme,
+    build_task_card_html,
+    render_auth_hero,
+    render_brand_header,
+    render_login_heading,
+    render_page_intro,
+    render_sidebar_identity,
+    render_steps,
+    task_card_button_key,
+)
 
 
 STATUS_LABELS = {
@@ -25,6 +45,21 @@ STATUS_LABELS = {
     "failed": "失败",
     "unknown": "未知",
 }
+
+IMAGE_INPUT_TYPES = ["png", "jpg", "jpeg", "webp", "bmp"]
+
+
+class _NamedImageInput:
+    def __init__(self, uploaded_file: Any, name: str) -> None:
+        self._uploaded_file = uploaded_file
+        self.name = name
+
+    @property
+    def size(self) -> int:
+        return len(bytes(self.getbuffer()))
+
+    def getbuffer(self) -> Any:
+        return self._uploaded_file.getbuffer()
 
 
 def _current_username() -> str | None:
@@ -43,48 +78,52 @@ def _register_from_form(username: str, password: str, password_confirmation: str
 
 
 def _show_auth_page() -> None:
-    st.subheader("登录后使用")
-    st.caption("登录状态仅在当前页面会话中保留，刷新网页后需要重新登录。")
-    login_tab, register_tab = st.tabs(["登录", "注册"])
+    hero_col, form_col = st.columns([1.12, 0.88], gap="large")
+    with hero_col:
+        render_auth_hero()
 
-    with login_tab:
-        with st.form("login_form"):
-            username = st.text_input("用户名", key="login_username")
-            password = st.text_input("密码", type="password", key="login_password")
-            submitted = st.form_submit_button("登录", type="primary", width="stretch")
+    with form_col:
+        render_login_heading()
+        login_tab, register_tab = st.tabs(["登录", "注册"])
 
-        if submitted:
-            try:
-                authenticated_username = authenticate_user(username, password)
-            except RuntimeError as exc:
-                st.error(str(exc))
-            else:
-                if authenticated_username:
-                    st.session_state["username"] = authenticated_username
-                    st.rerun()
+        with login_tab:
+            with st.form("login_form"):
+                username = st.text_input("用户名", key="login_username")
+                password = st.text_input("密码", type="password", key="login_password")
+                submitted = st.form_submit_button("登录", type="primary", width="stretch")
+
+            if submitted:
+                try:
+                    authenticated_username = authenticate_user(username, password)
+                except RuntimeError as exc:
+                    st.error(str(exc))
                 else:
-                    st.error("用户名或密码错误。")
+                    if authenticated_username:
+                        st.session_state["username"] = authenticated_username
+                        st.rerun()
+                    else:
+                        st.error("用户名或密码错误。")
 
-    with register_tab:
-        st.warning("当前为简化账号系统，密码会保存在本地文件中。请勿使用其他网站的常用密码。")
-        with st.form("register_form"):
-            username = st.text_input("注册用户名", key="register_username")
-            password = st.text_input("注册密码", type="password", key="register_password")
-            password_confirmation = st.text_input(
-                "确认密码",
-                type="password",
-                key="register_password_confirmation",
-            )
-            submitted = st.form_submit_button("注册并登录", type="primary", width="stretch")
+        with register_tab:
+            st.warning("当前为简化账号系统，密码会保存在本地文件中。请勿使用其他网站的常用密码。")
+            with st.form("register_form"):
+                username = st.text_input("注册用户名", key="register_username")
+                password = st.text_input("注册密码", type="password", key="register_password")
+                password_confirmation = st.text_input(
+                    "确认密码",
+                    type="password",
+                    key="register_password_confirmation",
+                )
+                submitted = st.form_submit_button("注册并登录", type="primary", width="stretch")
 
-        if submitted:
-            try:
-                registered_username = _register_from_form(username, password, password_confirmation)
-            except (AuthValidationError, RuntimeError) as exc:
-                st.error(str(exc))
-            else:
-                st.session_state["username"] = registered_username
-                st.rerun()
+            if submitted:
+                try:
+                    registered_username = _register_from_form(username, password, password_confirmation)
+                except (AuthValidationError, RuntimeError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state["username"] = registered_username
+                    st.rerun()
 
 
 def _uploaded_preview(uploaded_file: Any, max_side: int = 1100) -> Image.Image:
@@ -99,10 +138,236 @@ def _uploaded_preview(uploaded_file: Any, max_side: int = 1100) -> Image.Image:
     return image
 
 
-def _uploaded_file_signature(uploaded_file: Any) -> str:
+def _uploaded_file_size(uploaded_file: Any, data: bytes) -> int:
+    size = getattr(uploaded_file, "size", None)
+    try:
+        return int(size)
+    except (TypeError, ValueError):
+        return len(data)
+
+
+def _uploaded_file_name(uploaded_file: Any, *, source: str, digest: str) -> str:
+    name = str(getattr(uploaded_file, "name", "") or "").strip()
+    if name:
+        return name
+    if source in {"camera", "mobile"}:
+        return f"camera_{digest}.jpg"
+    return "uploaded_image.png"
+
+
+def _uploaded_file_signature(uploaded_file: Any, *, source: str = "upload") -> str:
     data = bytes(uploaded_file.getbuffer())
     digest = hashlib.blake2b(data, digest_size=8).hexdigest()
-    return f"{uploaded_file.name}:{uploaded_file.size}:{digest}"
+    name = _uploaded_file_name(uploaded_file, source=source, digest=digest)
+    size = _uploaded_file_size(uploaded_file, data)
+    return f"{source}:{name}:{size}:{digest}"
+
+
+def _with_camera_filename(uploaded_file: Any, key_prefix: str) -> Any:
+    data = bytes(uploaded_file.getbuffer())
+    digest = hashlib.blake2b(data, digest_size=8).hexdigest()
+    return _NamedImageInput(uploaded_file, f"camera_{key_prefix}_{digest}.jpg")
+
+
+def _query_param(name: str) -> str | None:
+    value = st.query_params.get(name)
+    if isinstance(value, list):
+        return str(value[0]) if value else None
+    return str(value) if value else None
+
+
+def _is_mobile_user_agent(user_agent: str | None) -> bool:
+    normalized = str(user_agent or "").lower()
+    if not normalized:
+        return False
+    mobile_markers = ("mobile", "android", "iphone", "ipad", "ipod")
+    return any(marker in normalized for marker in mobile_markers)
+
+
+def is_mobile_client() -> bool:
+    try:
+        user_agent = st.context.headers.get("user-agent")
+    except Exception:
+        return False
+    return _is_mobile_user_agent(user_agent)
+
+
+def _mobile_capture_url(token: str) -> str:
+    current_url = str(getattr(st.context, "url", "") or "")
+    parsed = urlparse(current_url)
+    if not parsed.scheme or not parsed.netloc:
+        parsed = urlparse("http://127.0.0.1:8501/")
+    query = urlencode({"mobile_capture": token})
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", query, ""))
+
+
+def _qr_png_bytes(url: str) -> bytes:
+    image = qrcode.make(url)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _clear_mobile_capture_state(key_prefix: str) -> None:
+    st.session_state.pop(f"{key_prefix}_mobile_token", None)
+    st.session_state.pop(f"{key_prefix}_mobile_file", None)
+    st.session_state.pop(f"{key_prefix}_mobile_signature", None)
+
+
+def _clear_desktop_camera_state(key_prefix: str) -> None:
+    st.session_state.pop(f"{key_prefix}_camera_open", None)
+    st.session_state.pop(f"{key_prefix}_camera", None)
+
+
+def _create_mobile_capture_for_session(key_prefix: str, owner_username: str) -> str:
+    capture = create_mobile_capture(owner_username, key_prefix)
+    token = str(capture["token"])
+    st.session_state[f"{key_prefix}_mobile_token"] = token
+    st.session_state.pop(f"{key_prefix}_mobile_file", None)
+    st.session_state.pop(f"{key_prefix}_mobile_signature", None)
+    return token
+
+
+def _select_mobile_capture_input(key_prefix: str, owner_username: str) -> Any | None:
+    token_key = f"{key_prefix}_mobile_token"
+    file_key = f"{key_prefix}_mobile_file"
+    if not st.session_state.get(token_key):
+        _create_mobile_capture_for_session(key_prefix, owner_username)
+
+    token = str(st.session_state.get(token_key))
+    status = get_mobile_capture_status(token)
+    if not status:
+        st.warning("手机拍照链接已过期，请重新生成二维码。")
+        if st.button("重新生成手机拍照二维码", key=f"{key_prefix}_mobile_refresh_expired"):
+            _create_mobile_capture_for_session(key_prefix, owner_username)
+            st.rerun()
+        return None
+
+    mobile_url = _mobile_capture_url(token)
+    col_qr, col_info = st.columns([0.34, 0.66], gap="large")
+    with col_qr:
+        st.image(_qr_png_bytes(mobile_url), caption="用手机扫码拍照", width=220)
+    with col_info:
+        st.markdown("#### 手机拍照上传")
+        st.write("手机扫码后会打开一次性拍照页，不需要再次登录。")
+        st.caption(f"有效期至：{status.get('expires_at', '-')}")
+        st.code(mobile_url, language=None)
+        st.caption("如果二维码里是 127.0.0.1 或 localhost，手机无法访问；请用电脑局域网 IP 打开本页后重新生成二维码。")
+        if st.button("重新生成二维码", key=f"{key_prefix}_mobile_refresh"):
+            _create_mobile_capture_for_session(key_prefix, owner_username)
+            st.rerun()
+
+    if st.button("检查手机照片", key=f"{key_prefix}_mobile_check", type="primary"):
+        mobile_file = get_mobile_capture_image(token, owner_username)
+        if mobile_file:
+            st.session_state[file_key] = mobile_file
+            st.session_state[f"{key_prefix}_mobile_signature"] = _uploaded_file_signature(
+                mobile_file,
+                source="mobile",
+            )
+            st.success("已收到手机照片。")
+        else:
+            st.info("还没有收到手机照片，请在手机页面拍照或上传后再检查。")
+
+    return st.session_state.get(file_key)
+
+
+def _select_image_input(
+    *,
+    key_prefix: str,
+    uploader_label: str,
+    camera_label: str,
+    owner_username: str,
+    mobile_client: bool | None = None,
+) -> tuple[Any | None, str | None]:
+    if mobile_client is None:
+        mobile_client = is_mobile_client()
+    if mobile_client:
+        _clear_desktop_camera_state(key_prefix)
+        _clear_mobile_capture_state(key_prefix)
+        st.caption("手机端可直接选择图片，系统通常会提供拍照或从相册选择。")
+        uploaded_file = st.file_uploader(
+            "选择图片或拍照上传",
+            type=IMAGE_INPUT_TYPES,
+            key=f"{key_prefix}_mobile_direct_upload",
+        )
+        return (uploaded_file, "upload") if uploaded_file else (None, None)
+
+    source_key = f"{key_prefix}_image_source"
+    source = st.segmented_control(
+        "图片来源",
+        ["上传图片", "电脑摄像头", "手机拍照"],
+        key=source_key,
+        default="上传图片",
+        width="stretch",
+    )
+    previous_source_key = f"{key_prefix}_previous_image_source"
+    previous_source = st.session_state.get(previous_source_key)
+    if previous_source != source:
+        st.session_state[previous_source_key] = source
+        if source == "上传图片":
+            _clear_desktop_camera_state(key_prefix)
+            _clear_mobile_capture_state(key_prefix)
+        elif source == "电脑摄像头":
+            _clear_mobile_capture_state(key_prefix)
+        elif source == "手机拍照":
+            _clear_desktop_camera_state(key_prefix)
+
+    if source == "上传图片":
+        uploaded_file = st.file_uploader(
+            uploader_label,
+            type=IMAGE_INPUT_TYPES,
+            key=f"{key_prefix}_uploader",
+        )
+        return (uploaded_file, "upload") if uploaded_file else (None, None)
+
+    if source == "电脑摄像头":
+        st.caption("浏览器会请求当前电脑的摄像头权限；线上访问通常需要 HTTPS，localhost 本地调试可直接使用。")
+        camera_open_key = f"{key_prefix}_camera_open"
+        if not st.session_state.get(camera_open_key):
+            st.info("点击下方按钮后才会打开摄像头区域。Streamlit 不能直接弹出系统相机，需要先渲染摄像头组件。")
+            if st.button("打开电脑摄像头", key=f"{key_prefix}_camera_open_button", type="primary"):
+                st.session_state[camera_open_key] = True
+                st.rerun()
+            return None, None
+
+        if st.button("关闭摄像头", key=f"{key_prefix}_camera_close_button"):
+            _clear_desktop_camera_state(key_prefix)
+            st.rerun()
+        camera_file = st.camera_input(camera_label, key=f"{key_prefix}_camera")
+        if camera_file:
+            return _with_camera_filename(camera_file, key_prefix), "camera"
+        return None, None
+
+    mobile_file = _select_mobile_capture_input(key_prefix, owner_username)
+    return (mobile_file, "mobile") if mobile_file else (None, None)
+
+
+def _show_mobile_capture_page(token: str) -> None:
+    render_page_intro("手机拍照上传", "选择图片或调用手机系统拍照，上传后回到电脑页面点击“检查手机照片”。", kicker="Mobile capture ✦")
+    status = get_mobile_capture_status(token)
+    if not status:
+        st.error("手机拍照链接已过期或不存在，请回到电脑端重新生成二维码。")
+        return
+    if status.get("used"):
+        st.success("照片已经上传成功，可以回到电脑端检查手机照片。")
+        return
+
+    st.caption(f"链接有效期至：{status.get('expires_at', '-')}")
+    selected_file = st.file_uploader(
+        "选择图片或拍照上传",
+        type=IMAGE_INPUT_TYPES,
+        key=f"mobile_upload_{token}",
+    )
+    st.caption("手机浏览器通常会在这里提供“拍照”或“从相册选择”。如果没有拍照选项，请先用系统相机拍好后从相册选择。")
+    if st.button("上传到电脑页面", type="primary", disabled=selected_file is None, width="stretch"):
+        try:
+            save_mobile_capture_upload(token, selected_file)
+        except MobileCaptureError as exc:
+            st.error(str(exc))
+        else:
+            st.success("上传成功，请回到电脑页面点击“检查手机照片”。")
+            st.rerun()
 
 
 def _score_number(value: Any) -> float | None:
@@ -200,6 +465,12 @@ def _question_by_no(questions: list[dict[str, Any]], question_no: str) -> dict[s
 
 def _paper_cut_question_by_no(paper_cut_questions: list[dict[str, Any]], question_no: str) -> dict[str, Any]:
     return _question_by_no(paper_cut_questions, question_no)
+
+
+def _result_error_message(status: dict[str, Any], result: dict[str, Any] | None) -> str | None:
+    if result and result.get("status") == "failed":
+        return result.get("error") or status.get("error") or "任务处理失败。"
+    return status.get("error")
 
 
 def _write_overview(result: dict[str, Any]) -> None:
@@ -318,28 +589,32 @@ def _build_report(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _save_processing_upload(uploaded_file: Any) -> str:
+def _save_processing_upload(uploaded_file: Any, *, source: str = "upload") -> str:
     ensure_runtime_dirs()
-    suffix = Path(uploaded_file.name).suffix.lower()
+    data = bytes(uploaded_file.getbuffer())
+    digest = hashlib.blake2b(data, digest_size=8).hexdigest()
+    filename = _uploaded_file_name(uploaded_file, source=source, digest=digest)
+    suffix = Path(filename).suffix.lower()
     if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
-        suffix = ".png"
+        suffix = ".jpg" if source in {"camera", "mobile"} else ".png"
 
     image_path = UPLOAD_DIR / f"processing_{uuid.uuid4()}{suffix}"
-    image_path.write_bytes(bytes(uploaded_file.getbuffer()))
+    image_path.write_bytes(data)
     return str(image_path)
 
 
 def _show_image_processing_page() -> None:
-    st.subheader("图片加工")
-    st.caption("自动检测文档边界，裁边拉正，并增强文字效果。")
+    render_page_intro("图片加工", "自动检测文档边界，裁边拉正，并增强文字效果。", kicker="Image lab ✦")
+    render_steps(["上传整页作业图", "选择清晰增强模式", "下载处理后的图片"])
 
-    uploaded_file = st.file_uploader(
-        "上传需要加工的作业图片",
-        type=["png", "jpg", "jpeg", "webp", "bmp"],
-        key="processing_uploader",
+    uploaded_file, image_source = _select_image_input(
+        key_prefix="processing",
+        uploader_label="上传需要加工的作业图片",
+        camera_label="拍摄需要加工的作业图片",
+        owner_username=_current_username() or "",
     )
     if not uploaded_file:
-        st.info("请先上传一张整页作业照片或扫描图片。")
+        st.info("请先上传或拍摄一张整页作业照片或扫描图片。")
         return
 
     mode_labels = {
@@ -354,7 +629,7 @@ def _show_image_processing_page() -> None:
         default="strong",
     )
 
-    original_path = _save_processing_upload(uploaded_file)
+    original_path = _save_processing_upload(uploaded_file, source=image_source or "upload")
     result = process_document_image(original_path, enhance_mode=selected_mode or "strong")
     original_preview_path = create_preview_image(original_path, suffix="original_preview")
     warped_preview_path = (
@@ -423,19 +698,24 @@ def _json_dumps_for_download(payload: dict[str, Any]) -> bytes:
 
 
 def _show_paper_cut_page() -> None:
-    st.subheader("试卷切题")
-    st.caption("调用腾讯云 QuestionSplitOCR，将整页试卷切成题目并返回文字和坐标。")
+    render_page_intro(
+        "试卷切题",
+        "调用腾讯云 QuestionSplitOCR，将整页试卷切成题目并返回文字和坐标。",
+        kicker="Question split ✦",
+    )
+    render_steps(["上传完整试卷", "设置识别选项", "查看并下载切题结果"])
 
-    uploaded_file = st.file_uploader(
-        "上传整页试卷图片",
-        type=["png", "jpg", "jpeg", "webp", "bmp"],
-        key="paper_cut_uploader",
+    uploaded_file, image_source = _select_image_input(
+        key_prefix="paper_cut",
+        uploader_label="上传整页试卷图片",
+        camera_label="拍摄整页试卷图片",
+        owner_username=_current_username() or "",
     )
     if not uploaded_file:
-        st.info("请上传一张练习册、试卷或教辅整页图片。")
+        st.info("请上传或拍摄一张练习册、试卷或教辅整页图片。")
         return
 
-    file_signature = _uploaded_file_signature(uploaded_file)
+    file_signature = _uploaded_file_signature(uploaded_file, source=image_source or "upload")
     if st.session_state.get("paper_cut_file_signature") != file_signature:
         st.session_state["paper_cut_file_signature"] = file_signature
         st.session_state.pop("paper_cut_result", None)
@@ -453,7 +733,7 @@ def _show_paper_cut_page() -> None:
         st.session_state.pop("paper_cut_result", None)
         st.session_state.pop("paper_cut_original_path", None)
         st.session_state.pop("paper_cut_processed", None)
-        original_path = _save_processing_upload(uploaded_file)
+        original_path = _save_processing_upload(uploaded_file, source=image_source or "upload")
         processing_result = process_document_image(original_path, enhance_mode="strong")
         enhanced_path = processing_result.get("enhanced_path")
         if (
@@ -573,6 +853,7 @@ def _task_rows(owner_username: str) -> list[dict[str, Any]]:
             {
                 "任务ID": item["task_id"],
                 "状态": STATUS_LABELS.get(item.get("status"), item.get("status")),
+                "_status": item.get("status"),
                 "分数": _score_display(result.get("questions", [])) if result else "-",
                 "创建时间": item.get("created_at", "-"),
                 "更新时间": item.get("updated_at", "-"),
@@ -587,6 +868,7 @@ def _task_rows(owner_username: str) -> list[dict[str, Any]]:
             {
                 "任务ID": task_id,
                 "状态": STATUS_LABELS.get(result.get("status"), result.get("status")),
+                "_status": result.get("status"),
                 "分数": _score_display(result.get("questions", [])),
                 "创建时间": result.get("saved_at", "-"),
                 "更新时间": result.get("finished_at", result.get("saved_at", "-")),
@@ -603,7 +885,7 @@ def _show_result(task_id: str, owner_username: str) -> None:
         st.error("任务不存在，或你无权查看该任务。")
         return
 
-    st.subheader("任务详情")
+    render_page_intro("任务详情", "查看批改进度、整体评价与逐题反馈。", kicker="Correction report ✦")
     status_text = STATUS_LABELS.get(status.get("status"), status.get("status", "未知"))
     st.caption(f"任务ID：{task_id}")
 
@@ -614,17 +896,20 @@ def _show_result(task_id: str, owner_username: str) -> None:
     col_c.metric("正确率", _correct_rate(result.get("questions", [])) if result else "-")
     col_d.metric("识别题数", question_count)
 
-    if status.get("error"):
-        st.error(status["error"])
-
+    error_message = _result_error_message(status, result)
     image_path = (result.get("image_path") if result else None) or status.get("image_path")
     if not result:
+        if error_message:
+            st.error(error_message)
         st.info("任务尚未完成。点击刷新可查看最新状态。")
         return
 
     if result.get("status") == "failed":
-        st.error(result.get("error") or "任务处理失败。")
+        st.error(error_message or "任务处理失败。")
         return
+
+    if error_message:
+        st.error(error_message)
 
     with st.expander("查看整体评价", expanded=False):
         _write_overview(result)
@@ -697,11 +982,14 @@ def _show_result(task_id: str, owner_username: str) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="智能作业批改系统", layout="wide")
+    st.set_page_config(page_title="智能作业批改系统", page_icon="✦", layout="wide")
     ensure_runtime_dirs()
+    apply_app_theme()
 
-    st.title("中小学作业智能批改系统")
-    st.caption("Streamlit + 任务队列 + 腾讯云切题 OCR + 大模型批改")
+    mobile_capture_token = _query_param("mobile_capture")
+    if mobile_capture_token:
+        _show_mobile_capture_page(mobile_capture_token)
+        return
 
     owner_username = _current_username()
     if not owner_username:
@@ -712,8 +1000,7 @@ def main() -> None:
     start_workers()
 
     with st.sidebar:
-        st.header("导航")
-        st.caption(f"当前账号：{owner_username}")
+        render_sidebar_identity(owner_username)
         page = st.radio("页面", ["上传批改", "图片加工", "试卷切题", "任务列表", "项目说明"], label_visibility="collapsed")
         if st.button("刷新状态", width="stretch"):
             st.rerun()
@@ -721,14 +1008,19 @@ def main() -> None:
             _logout_session()
             st.rerun()
 
+    render_brand_header()
+
     if page == "上传批改":
-        uploaded_file = st.file_uploader(
-            "上传作业图片",
-            type=["png", "jpg", "jpeg", "webp", "bmp"],
-            key="correction_uploader",
+        render_page_intro("上传批改", "提交一张作业图片，后台队列会依次完成切题、识别和智能批改。", kicker="Homework correction ✦")
+        render_steps(["上传作业图片", "提交后台批改", "刷新并查看报告"])
+        uploaded_file, image_source = _select_image_input(
+            key_prefix="correction",
+            uploader_label="上传作业图片",
+            camera_label="拍摄作业图片",
+            owner_username=owner_username,
         )
         if uploaded_file:
-            file_signature = _uploaded_file_signature(uploaded_file)
+            file_signature = _uploaded_file_signature(uploaded_file, source=image_source or "upload")
             if st.session_state.get("correction_file_signature") != file_signature:
                 st.session_state["correction_file_signature"] = file_signature
                 st.session_state.pop("selected_task_id", None)
@@ -752,18 +1044,35 @@ def main() -> None:
         _show_paper_cut_page()
 
     elif page == "任务列表":
+        render_page_intro("任务列表", "集中查看自己的历史批改记录和当前处理进度。", kicker="My homework archive ✦")
         rows = _task_rows(owner_username)
         if not rows:
             st.info("暂无任务。")
             return
 
-        st.dataframe(rows, width="stretch", hide_index=True)
-        task_ids = [row["任务ID"] for row in rows]
-        selected = st.selectbox("选择任务查看详情", task_ids)
-        if selected:
-            _show_result(selected, owner_username)
+        summary_cols = st.columns(3)
+        summary_cols[0].metric("任务总数", len(rows))
+        summary_cols[1].metric("已完成", sum(row.get("_status") == "finished" for row in rows))
+        summary_cols[2].metric(
+            "处理中",
+            sum(row.get("_status") in {"waiting", "running"} for row in rows),
+        )
+
+        st.markdown("#### 批改记录")
+        for row in rows:
+            task_id = str(row["任务ID"])
+            with st.container(border=True):
+                st.markdown(build_task_card_html(row), unsafe_allow_html=True)
+                if st.button("查看详情", key=task_card_button_key(task_id), width="stretch"):
+                    st.session_state["selected_task_id"] = task_id
+
+        selected_task_id = st.session_state.get("selected_task_id")
+        if selected_task_id:
+            st.divider()
+            _show_result(str(selected_task_id), owner_username)
 
     else:
+        render_page_intro("项目说明", "了解当前系统的运行结构、适用范围和演示配置。", kicker="About this project ✦")
         st.markdown(
             """
 ### 项目架构

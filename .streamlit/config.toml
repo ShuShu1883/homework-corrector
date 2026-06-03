@@ -1,0 +1,19 @@
+[client]
+toolbarMode = "auto"
+
+[theme]
+base = "light"
+primaryColor = "#D94F91"
+backgroundColor = "#FFF9FC"
+secondaryBackgroundColor = "#FFF0F7"
+textColor = "#57364B"
+borderColor = "#F2C6DA"
+baseRadius = "large"
+buttonRadius = "full"
+showSidebarBorder = true
+
+[theme.sidebar]
+backgroundColor = "#FFF3F9"
+secondaryBackgroundColor = "#FFE8F3"
+textColor = "#57364B"
+borderColor = "#F2C6DA"
