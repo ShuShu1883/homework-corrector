@@ -4,13 +4,13 @@ import queue
 import shutil
 import threading
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from config import UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
 from runtime_cleanup import cleanup_runtime_files
 from storage import load_result, save_result
+from time_utils import beijing_now_iso
 
 
 _task_queue: queue.Queue[dict[str, str]] = queue.Queue()
@@ -21,7 +21,7 @@ _started = False
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return beijing_now_iso()
 
 
 def _safe_extension(filename: str | None) -> str:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +7,7 @@ from image_processing import create_annotated_correction_image, create_preview_i
 from llm_corrector import correct_homework
 from paper_cut_tencent import recognize_question_split
 from storage import save_result
+from time_utils import beijing_now_iso
 
 
 def _prepare_ocr_image(task_id: str, image_path: str) -> dict[str, Any]:
@@ -78,7 +78,7 @@ def process_homework(task_id: str, image_path: str, owner_username: str) -> dict
         "weaknesses": correction.get("weaknesses", []),
         "next_steps": correction.get("next_steps", []),
         "error": None,
-        "finished_at": datetime.now().isoformat(timespec="seconds"),
+        "finished_at": beijing_now_iso(),
         "ocr_raw": ocr_result.get("raw"),
     }
     save_result(task_id, result)

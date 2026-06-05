@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from config import DATA_DIR, ensure_runtime_dirs
+from time_utils import beijing_now
 
 
 CAPTURE_TTL_MINUTES = 10
@@ -34,7 +35,7 @@ class MobileCaptureImage:
 
 
 def _now() -> datetime:
-    return datetime.now()
+    return beijing_now()
 
 
 def _iso(value: datetime) -> str:

@@ -16,6 +16,7 @@ class AuthTests(unittest.TestCase):
         self.patches = [
             patch.object(auth, "USERS_PATH", self.users_path),
             patch.object(auth, "ensure_runtime_dirs", lambda: self.data_dir.mkdir(parents=True, exist_ok=True)),
+            patch.object(auth, "is_mysql_enabled", return_value=False),
         ]
         for item in self.patches:
             item.start()

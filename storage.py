@@ -1,22 +1,55 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from config import RESULT_DIR, ensure_runtime_dirs
+from db import DatabaseError, execute, fetch_all, fetch_one, initialize_database, is_mysql_enabled
+from time_utils import beijing_now_iso
+
+
+logger = logging.getLogger(__name__)
 
 
 def _result_path(task_id: str) -> Path:
     return RESULT_DIR / f"{task_id}.json"
 
 
-def save_result(task_id: str, result: dict[str, Any]) -> None:
+def _log_mysql_fallback(action: str, exc: Exception) -> None:
+    logger.warning("MySQL result %s failed; falling back to JSON storage: %s", action, exc)
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _decode_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        if isinstance(decoded, dict):
+            return decoded
+    raise ValueError("Stored result payload is not a JSON object.")
+
+
+def _save_result_json(task_id: str, result: dict[str, Any]) -> None:
     ensure_runtime_dirs()
     payload = {
         "task_id": task_id,
-        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "saved_at": beijing_now_iso(),
         **result,
     }
     path = _result_path(task_id)
@@ -28,7 +61,47 @@ def save_result(task_id: str, result: dict[str, Any]) -> None:
     temp_path.replace(path)
 
 
-def load_result(task_id: str, *, owner_username: str | None = None) -> dict[str, Any] | None:
+def _save_result_mysql(task_id: str, result: dict[str, Any]) -> None:
+    initialize_database()
+    payload = {
+        "task_id": task_id,
+        "saved_at": beijing_now_iso(),
+        **result,
+    }
+    execute(
+        """
+        INSERT INTO results (task_id, owner_username, status, saved_at, finished_at, payload)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            owner_username = VALUES(owner_username),
+            status = VALUES(status),
+            saved_at = VALUES(saved_at),
+            finished_at = VALUES(finished_at),
+            payload = VALUES(payload)
+        """,
+        (
+            task_id,
+            str(payload.get("owner_username") or ""),
+            str(payload.get("status") or "unknown"),
+            _parse_datetime(payload.get("saved_at")),
+            _parse_datetime(payload.get("finished_at")),
+            json.dumps(payload, ensure_ascii=False),
+        ),
+    )
+
+
+def save_result(task_id: str, result: dict[str, Any]) -> None:
+    if is_mysql_enabled():
+        try:
+            _save_result_mysql(task_id, result)
+            return
+        except DatabaseError as exc:
+            _log_mysql_fallback("save", exc)
+
+    _save_result_json(task_id, result)
+
+
+def _load_result_json(task_id: str, *, owner_username: str | None = None) -> dict[str, Any] | None:
     path = _result_path(task_id)
     if not path.exists():
         return None
@@ -47,11 +120,63 @@ def load_result(task_id: str, *, owner_username: str | None = None) -> dict[str,
     return result
 
 
-def list_results(*, owner_username: str | None = None) -> list[dict[str, Any]]:
+def _load_result_mysql(task_id: str, *, owner_username: str | None = None) -> dict[str, Any] | None:
+    initialize_database()
+    if owner_username is None:
+        row = fetch_one("SELECT payload FROM results WHERE task_id = %s", (task_id,))
+    else:
+        row = fetch_one(
+            "SELECT payload FROM results WHERE task_id = %s AND owner_username = %s",
+            (task_id, owner_username),
+        )
+    if not row:
+        return None
+    return _decode_payload(row.get("payload"))
+
+
+def load_result(task_id: str, *, owner_username: str | None = None) -> dict[str, Any] | None:
+    if is_mysql_enabled():
+        try:
+            return _load_result_mysql(task_id, owner_username=owner_username)
+        except (DatabaseError, ValueError, json.JSONDecodeError) as exc:
+            _log_mysql_fallback("load", exc)
+
+    return _load_result_json(task_id, owner_username=owner_username)
+
+
+def _list_results_json(*, owner_username: str | None = None) -> list[dict[str, Any]]:
     ensure_runtime_dirs()
     results: list[dict[str, Any]] = []
     for path in sorted(RESULT_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
-        item = load_result(path.stem, owner_username=owner_username)
+        item = _load_result_json(path.stem, owner_username=owner_username)
         if item:
             results.append(item)
     return results
+
+
+def _list_results_mysql(*, owner_username: str | None = None) -> list[dict[str, Any]]:
+    initialize_database()
+    if owner_username is None:
+        rows = fetch_all(
+            "SELECT payload FROM results ORDER BY COALESCE(saved_at, finished_at) DESC, task_id DESC"
+        )
+    else:
+        rows = fetch_all(
+            """
+            SELECT payload FROM results
+            WHERE owner_username = %s
+            ORDER BY COALESCE(saved_at, finished_at) DESC, task_id DESC
+            """,
+            (owner_username,),
+        )
+    return [_decode_payload(row.get("payload")) for row in rows]
+
+
+def list_results(*, owner_username: str | None = None) -> list[dict[str, Any]]:
+    if is_mysql_enabled():
+        try:
+            return _list_results_mysql(owner_username=owner_username)
+        except (DatabaseError, ValueError, json.JSONDecodeError) as exc:
+            _log_mysql_fallback("list", exc)
+
+    return _list_results_json(owner_username=owner_username)

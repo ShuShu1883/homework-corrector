@@ -16,6 +16,7 @@ class StorageIsolationTests(unittest.TestCase):
         self.patches = [
             patch.object(storage, "RESULT_DIR", self.result_dir),
             patch.object(storage, "ensure_runtime_dirs", lambda: self.result_dir.mkdir(parents=True, exist_ok=True)),
+            patch.object(storage, "is_mysql_enabled", return_value=False),
         ]
         for item in self.patches:
             item.start()
