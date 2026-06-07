@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import requests
 
-from config import DEBUG_DIR, get_int_setting, get_setting
+from config import get_int_setting, get_setting
 
 
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com"
 DEFAULT_LLM_MODEL = "deepseek-v4-pro"
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_CONSISTENCY_RETRIES = 2
+SUBJECT_CATEGORIES = ("数学", "语文", "英语", "物理", "化学", "生物", "地理", "历史", "政治", "其他")
 
 HTTP_ERROR_MESSAGES = {
     401: "大模型认证失败，请检查 LLM_API_KEY 或 DEEPSEEK_API_KEY 是否正确。",
@@ -125,6 +125,7 @@ def _prepare_questions_for_llm(questions: list[Any]) -> list[dict[str, Any]]:
 
 def _mock_correction(ocr_result: dict[str, Any]) -> dict[str, Any]:
     return {
+        "subject": "数学",
         "score": 82,
         "summary": "共识别 2 道题，基础计算思路基本清楚，但第 1 题结果出现偏差，需要加强验算习惯。",
         "comments": "整体书写较完整，能呈现主要步骤。第 1 题计算结果错误；第 2 题答案和过程正确。",
@@ -303,6 +304,8 @@ def _grade_prompt(
 6. **不确定的题目**：OCR 不清或学生作答无法辨认时降低 confidence，uncertain_reason 说明原因，且不能给满分
 7. **总分必须等于逐题得分之和**：score 字段的值必须恰好等于所有题目 score 之和。例如第1题得 30、第2题得 45，则 score 必须是 75。score_breakdown 格式如"第1题 30/40，第2题 45/60，总分 75/100"。
 
+8. **科目判断**：根据整份作业内容判断 subject，只能从“数学、语文、英语、物理、化学、生物、地理、历史、政治、其他”十个值中选择一个；不确定时选择“其他”。
+
 === OCR 原文（辅助理解） ===
 
 {ocr_text}
@@ -314,6 +317,7 @@ def _grade_prompt(
 === 返回 JSON 格式 ===
 
 {{{{
+  "subject": "数学",
   "score": 85,
   "summary": "整体表现概述",
   "comments": "总体批注",
@@ -444,6 +448,11 @@ def _parse_derived_answers(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _normalize_subject(value: Any) -> str:
+    subject = str(value or "").strip()
+    return subject if subject in SUBJECT_CATEGORIES else "其他"
+
+
 def _normalize_correction(payload: dict[str, Any]) -> dict[str, Any]:
     """标准化「批改评分」阶段的 LLM 返回。
 
@@ -471,6 +480,7 @@ def _normalize_correction(payload: dict[str, Any]) -> dict[str, Any]:
         score_breakdown = "，".join(parts)
 
     return {
+        "subject": _normalize_subject(payload.get("subject")),
         "score": total,
         "summary": str(payload.get("summary", "")),
         "comments": str(payload.get("comments", "")),
@@ -626,47 +636,11 @@ def _validate_correct_answers(
 # ---------------------------------------------------------------------------
 
 
-def _save_debug_response(label: str, payload: dict[str, Any], response_text: str) -> None:
-    """保存原始 LLM 请求和响应用于调试。"""
-    try:
-        DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        path = DEBUG_DIR / f"{label}_{timestamp}.json"
-        # 只保存关键信息，不泄露完整 API key
-        safe_payload = {
-            "model": payload.get("model"),
-            "message_count": len(payload.get("messages", [])),
-            "temperature": payload.get("temperature"),
-            "max_tokens": payload.get("max_tokens"),
-            "user_prompt_preview": (
-                payload.get("messages", [{}])[-1].get("content", "")[:500]
-                if payload.get("messages")
-                else ""
-            ),
-        }
-        path.write_text(
-            json.dumps(
-                {
-                    "label": label,
-                    "timestamp": timestamp,
-                    "request": safe_payload,
-                    "response": response_text[:5000],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-    except Exception:
-        pass  # 调试日志不阻断主流程
-
-
 def _make_llm_request(
     *,
     base_url: str,
     api_key: str,
     payload: dict[str, Any],
-    debug_label: str = "llm",
 ) -> str:
     """发送 LLM 请求并返回原始 content 字符串。"""
     try:
@@ -689,7 +663,6 @@ def _make_llm_request(
     except (KeyError, IndexError, TypeError) as exc:
         raise ValueError("大模型返回结构不符合 Chat Completions 格式。") from exc
 
-    _save_debug_response(debug_label, payload, content)
     return content
 
 
@@ -772,7 +745,6 @@ def _request_derive_answers(
         base_url=base_url,
         api_key=api_key,
         payload=payload,
-        debug_label="derive_answers" + ("_retry" if retry_json else ""),
     )
 
     parsed = _parse_json_response(content)
@@ -886,7 +858,6 @@ def _request_grade(
         base_url=base_url,
         api_key=api_key,
         payload=payload,
-        debug_label=label,
     )
 
     return _normalize_correction(_parse_json_response(content))

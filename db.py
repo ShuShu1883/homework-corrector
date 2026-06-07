@@ -89,10 +89,16 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS users (
                 username VARCHAR(24) PRIMARY KEY,
                 password VARCHAR(128) NOT NULL,
+                display_name VARCHAR(80) NULL,
                 created_at DATETIME NULL
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
             """
         )
+        try:
+            execute("ALTER TABLE users ADD COLUMN display_name VARCHAR(80) NULL AFTER password")
+        except DatabaseError as exc:
+            if "Duplicate column" not in str(exc) and "already exists" not in str(exc):
+                raise
         execute(
             """
             CREATE TABLE IF NOT EXISTS results (

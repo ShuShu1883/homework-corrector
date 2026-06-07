@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from config import DEBUG_DIR, PROCESSED_DIR, ensure_runtime_dirs
+from config import PROCESSED_DIR, ensure_runtime_dirs
 
 
 MAX_DETECT_SIDE = 1000
@@ -692,14 +692,6 @@ def enhance_document(image: np.ndarray, mode: str = "standard") -> np.ndarray:
     return cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
 
 
-def _draw_debug_contour(image: np.ndarray, corners: np.ndarray | None, path: Path) -> str:
-    debug_image = image.copy()
-    if corners is not None:
-        pts = corners.astype(np.int32).reshape((-1, 1, 2))
-        cv2.polylines(debug_image, [pts], isClosed=True, color=(255, 0, 0), thickness=4)
-    return _save_rgb_image(path, debug_image)
-
-
 def process_document_image(image_path: str, task_id: str | None = None, enhance_mode: str = "standard") -> dict[str, Any]:
     ensure_runtime_dirs()
     task_id = task_id or str(uuid.uuid4())
@@ -723,14 +715,12 @@ def process_document_image(image_path: str, task_id: str | None = None, enhance_
         enhanced = enhance_document(warped, mode=enhance_mode)
         warped_path = PROCESSED_DIR / f"{task_id}_warped.png"
         enhanced_path = PROCESSED_DIR / f"{task_id}_enhanced.png"
-        debug_path = DEBUG_DIR / f"{task_id}_corners.png"
 
         return {
             "status": status,
             "original_path": image_path,
             "warped_path": _save_rgb_image(warped_path, warped),
             "enhanced_path": _save_rgb_image(enhanced_path, enhanced),
-            "debug_path": _draw_debug_contour(working, corners, debug_path),
             "enhance_mode": enhance_mode,
             "corners": corners_payload,
             "message": message,
@@ -741,7 +731,6 @@ def process_document_image(image_path: str, task_id: str | None = None, enhance_
             "original_path": image_path,
             "warped_path": None,
             "enhanced_path": None,
-            "debug_path": None,
             "corners": None,
             "message": str(exc) or exc.__class__.__name__,
         }

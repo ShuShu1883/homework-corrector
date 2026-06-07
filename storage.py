@@ -172,6 +172,27 @@ def _list_results_mysql(*, owner_username: str | None = None) -> list[dict[str, 
     return [_decode_payload(row.get("payload")) for row in rows]
 
 
+def _delete_results_json(owner_username: str) -> list[dict[str, Any]]:
+    ensure_runtime_dirs()
+    removed: list[dict[str, Any]] = []
+    for path in sorted(RESULT_DIR.glob("*.json")):
+        item = _load_result_json(path.stem, owner_username=owner_username)
+        if not item:
+            continue
+        removed.append(item)
+        path.unlink(missing_ok=True)
+        path.with_suffix(".tmp").unlink(missing_ok=True)
+    return removed
+
+
+def _delete_results_mysql(owner_username: str) -> list[dict[str, Any]]:
+    initialize_database()
+    rows = fetch_all("SELECT payload FROM results WHERE owner_username = %s", (owner_username,))
+    removed = [_decode_payload(row.get("payload")) for row in rows]
+    execute("DELETE FROM results WHERE owner_username = %s", (owner_username,))
+    return removed
+
+
 def list_results(*, owner_username: str | None = None) -> list[dict[str, Any]]:
     if is_mysql_enabled():
         try:
@@ -180,3 +201,17 @@ def list_results(*, owner_username: str | None = None) -> list[dict[str, Any]]:
             _log_mysql_fallback("list", exc)
 
     return _list_results_json(owner_username=owner_username)
+
+
+def delete_results(owner_username: str) -> list[dict[str, Any]]:
+    normalized = str(owner_username or "").strip().lower()
+    if not normalized:
+        return []
+
+    if is_mysql_enabled():
+        try:
+            return _delete_results_mysql(normalized)
+        except (DatabaseError, ValueError, json.JSONDecodeError) as exc:
+            _log_mysql_fallback("delete", exc)
+
+    return _delete_results_json(normalized)

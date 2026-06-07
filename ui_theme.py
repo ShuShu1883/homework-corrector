@@ -49,6 +49,36 @@ def build_task_card_html(row: dict[str, Any]) -> str:
     """
 
 
+def build_leaderboard_card_html(row: dict[str, Any], *, is_current_user: bool = False) -> str:
+    rank = int(row.get("rank") or 0)
+    rank_label = "👑" if rank == 1 else str(rank)
+    current_class = " current-user" if is_current_user else ""
+    me_badge = '<span class="leaderboard-me">我</span>' if is_current_user else ""
+    return f"""
+    <div class="leaderboard-card{current_class}">
+        <div class="leaderboard-avatar">{escape_html(rank_label)}</div>
+        <div class="leaderboard-person">
+            <div class="leaderboard-name">{escape_html(row.get("display_name"))}{me_badge}</div>
+            <div class="leaderboard-username">{escape_html(row.get("username"))}</div>
+        </div>
+        <div class="leaderboard-stats">
+            <div>
+                <strong>{escape_html(row.get("average_rate_label"))}</strong>
+                <span>平均得分率</span>
+            </div>
+            <div>
+                <strong>{escape_html(row.get("task_count"))}</strong>
+                <span>批改次数</span>
+            </div>
+            <div>
+                <strong>{escape_html(row.get("total_score_label"))}</strong>
+                <span>总分</span>
+            </div>
+        </div>
+    </div>
+    """
+
+
 def apply_app_theme() -> None:
     st.markdown(
         """
@@ -332,6 +362,99 @@ def apply_app_theme() -> None:
             font-size: .93rem;
         }
 
+        .leaderboard-card {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 1.15rem;
+            min-height: 6.4rem;
+            padding: 1.05rem 1.6rem;
+            margin: .8rem 0;
+            border-radius: 24px;
+            border: 1px solid rgba(226, 127, 177, .46);
+            background: rgba(255, 246, 251, .74);
+            box-shadow: 0 8px 22px rgba(217, 79, 145, .10), inset 0 0 0 3px rgba(255, 202, 226, .22);
+        }
+
+        .leaderboard-card.current-user {
+            border-color: rgba(217, 79, 145, .72);
+            background: rgba(255, 241, 248, .90);
+        }
+
+        .leaderboard-avatar {
+            width: 3.7rem;
+            height: 3.7rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            color: #a23c75;
+            background: linear-gradient(145deg, #ffd75d, #ffc94d);
+            font-size: 1.18rem;
+            font-weight: 900;
+            box-shadow: 0 8px 18px rgba(255, 198, 68, .28);
+        }
+
+        .leaderboard-person {
+            min-width: 0;
+        }
+
+        .leaderboard-name {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+            color: #60354f;
+            font-size: 1.08rem;
+            font-weight: 850;
+            line-height: 1.2;
+        }
+
+        .leaderboard-username {
+            margin-top: .4rem;
+            color: var(--sakura-muted);
+            font-size: .92rem;
+            word-break: break-all;
+        }
+
+        .leaderboard-me {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.75rem;
+            height: 1.75rem;
+            padding: 0 .45rem;
+            border-radius: 999px;
+            color: white;
+            background: var(--sakura-primary);
+            font-size: .82rem;
+            font-weight: 850;
+        }
+
+        .leaderboard-stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(5.2rem, 1fr));
+            gap: 1.1rem;
+            min-width: 24rem;
+            text-align: center;
+        }
+
+        .leaderboard-stats div {
+            display: flex;
+            flex-direction: column;
+            gap: .28rem;
+        }
+
+        .leaderboard-stats strong {
+            color: #a23c75;
+            font-size: 1.05rem;
+            font-weight: 900;
+        }
+
+        .leaderboard-stats span {
+            color: var(--sakura-muted);
+            font-size: .88rem;
+        }
+
         .status-finished { color: #28745b; background: #e7f8f0; }
         .status-running { color: #956322; background: #fff5d9; }
         .status-waiting { color: #8d5b85; background: #f8eafb; }
@@ -354,8 +477,22 @@ def apply_app_theme() -> None:
 
             .brand-header,
             .task-card-top,
-            .task-card-grid {
+            .task-card-grid,
+            .leaderboard-card {
                 flex-direction: column;
+            }
+
+            .leaderboard-card {
+                display: flex;
+                align-items: flex-start;
+                padding: 1rem;
+            }
+
+            .leaderboard-stats {
+                width: 100%;
+                min-width: 0;
+                grid-template-columns: repeat(3, 1fr);
+                gap: .55rem;
             }
 
             .steps-row {
@@ -374,7 +511,7 @@ def render_auth_hero() -> None:
         <section class="anime-hero">
             <div class="anime-kicker">Sakura Homework Studio ✦</div>
             <h1>让每一次批改<br>都更轻松一点</h1>
-            <p>上传作业图片，交给 OCR 与大模型完成切题、分析和逐题反馈。适合日常练习，也适合课堂演示。</p>
+            <p>上传作业图片，交给 OCR 与大模型完成切题、分析和逐题反馈。适合日常练习，也适合课堂使用。</p>
             <div class="anime-tags">
                 <span class="anime-tag">✦ 智能切题</span>
                 <span class="anime-tag">✦ 逐题批改</span>
@@ -414,11 +551,12 @@ def render_brand_header() -> None:
     )
 
 
-def render_sidebar_identity(username: str) -> None:
+def render_sidebar_identity(username: str, display_name: str | None = None) -> None:
+    display_name = display_name or username
     st.markdown(
         f"""
         <div class="sidebar-brand">✦ Sakura 批改台</div>
-        <div class="sidebar-account">当前账号<br><strong>{escape_html(username)}</strong></div>
+        <div class="sidebar-account">用户名<br><strong>{escape_html(display_name)}</strong><br><span>账号：{escape_html(username)}</span></div>
         """,
         unsafe_allow_html=True,
     )

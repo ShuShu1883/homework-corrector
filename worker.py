@@ -68,6 +68,7 @@ def process_homework(task_id: str, image_path: str, owner_username: str) -> dict
         "processing": prepared["processing"],
         "ocr_text": ocr_result.get("ocr_text", ""),
         "paper_cut_questions": ocr_result.get("questions", []),
+        "subject": correction.get("subject", "其他"),
         "questions": correction.get("questions", []),
         "score": correction.get("score", 0),
         "summary": correction.get("summary", ""),

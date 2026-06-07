@@ -17,7 +17,6 @@ RUNTIME_DIR = Path(os.getenv("APP_RUNTIME_DIR") or BASE_DIR).resolve()
 UPLOAD_DIR = RUNTIME_DIR / "uploads"
 RESULT_DIR = RUNTIME_DIR / "results"
 PROCESSED_DIR = RUNTIME_DIR / "processed"
-DEBUG_DIR = RUNTIME_DIR / "debug"
 CUT_DIR = RUNTIME_DIR / "cuts"
 DATA_DIR = RUNTIME_DIR / "data"
 
@@ -60,6 +59,5 @@ def ensure_runtime_dirs() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    DEBUG_DIR.mkdir(parents=True, exist_ok=True)
     CUT_DIR.mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)

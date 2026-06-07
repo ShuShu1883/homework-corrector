@@ -3,10 +3,10 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from config import CUT_DIR, DEBUG_DIR, PROCESSED_DIR, UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
+from config import CUT_DIR, PROCESSED_DIR, UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
 
 
-TRANSIENT_DIRS = (UPLOAD_DIR, PROCESSED_DIR, CUT_DIR, DEBUG_DIR)
+TRANSIENT_DIRS = (UPLOAD_DIR, PROCESSED_DIR, CUT_DIR)
 DEFAULT_MAX_AGE_HOURS = 24
 _last_cleanup_at = 0.0
 
