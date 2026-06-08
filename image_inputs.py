@@ -149,7 +149,6 @@ def _select_mobile_capture_input(key_prefix: str, owner_username: str) -> Any | 
         st.write("手机扫码后会打开一次性拍照页，不需要再次登录。")
         st.caption(f"有效期至：{status.get('expires_at', '-')}")
         st.code(mobile_url, language=None)
-        st.caption("如果二维码里是 127.0.0.1 或 localhost，手机无法访问；请用电脑局域网 IP 打开本页后重新生成二维码。")
         if st.button("重新生成二维码", key=f"{key_prefix}_mobile_refresh"):
             _create_mobile_capture_for_session(key_prefix, owner_username)
             st.rerun()

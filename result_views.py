@@ -19,6 +19,10 @@ from task_queue import get_task_status, list_tasks
 from ui_theme import build_task_card_html, render_page_intro, task_card_button_key
 
 
+POLL_INTERVAL = "3s"
+ACTIVE_TASK_STATUSES = {"waiting", "running"}
+
+
 def _stringify_detail(value: Any, default: str = "暂无") -> str:
     if value in (None, ""):
         return default
@@ -171,26 +175,35 @@ def _build_report(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _task_rows(owner_username: str) -> list[dict[str, Any]]:
-    rows = []
-    known_ids = set()
-    for item in list_tasks(owner_username=owner_username):
-        known_ids.add(item["task_id"])
-        result = load_result(item["task_id"], owner_username=owner_username)
-        rows.append(
-            {
-                "任务ID": item["task_id"],
-                "状态": STATUS_LABELS.get(item.get("status"), item.get("status")),
-                "_status": item.get("status"),
-                "分数": _score_display(result.get("questions", [])) if result else "-",
-                "创建时间": item.get("created_at", "-"),
-                "更新时间": item.get("updated_at", "-"),
-            }
-        )
+def _task_status_row(item: dict[str, Any], owner_username: str) -> dict[str, Any]:
+    task_id = str(item["task_id"])
+    status = get_task_status(task_id, owner_username=owner_username)
+    result = load_result(task_id, owner_username=owner_username)
+    raw_status = str(status.get("status") or item.get("status") or "unknown")
+    return {
+        "任务ID": task_id,
+        "状态": STATUS_LABELS.get(raw_status, raw_status),
+        "_status": raw_status,
+        "分数": _score_display(result.get("questions", [])) if result else "-",
+        "创建时间": item.get("created_at", "-"),
+        "更新时间": status.get("updated_at", item.get("updated_at", "-")),
+    }
 
+
+def _processing_task_rows(owner_username: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in list_tasks(owner_username=owner_username):
+        row = _task_status_row(item, owner_username)
+        if row.get("_status") in ACTIVE_TASK_STATUSES:
+            rows.append(row)
+    return rows
+
+
+def _history_result_rows(owner_username: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for result in list_results(owner_username=owner_username):
         task_id = result.get("task_id")
-        if not task_id or task_id in known_ids:
+        if not task_id:
             continue
         rows.append(
             {
@@ -203,6 +216,27 @@ def _task_rows(owner_username: str) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def _render_task_cards(rows: list[dict[str, Any]], *, rerun_on_click: bool = False) -> None:
+    for row in rows:
+        task_id = str(row["任务ID"])
+        with st.container(border=True):
+            st.markdown(build_task_card_html(row), unsafe_allow_html=True)
+            if st.button("查看详情", key=task_card_button_key(task_id), width="stretch"):
+                st.session_state["selected_task_id"] = task_id
+                if rerun_on_click:
+                    st.rerun()
+
+
+@st.fragment(run_every=POLL_INTERVAL)
+def _poll_processing_records(owner_username: str) -> None:
+    rows = _processing_task_rows(owner_username)
+    if not rows:
+        st.rerun()
+
+    st.markdown("#### 正在处理")
+    _render_task_cards(rows, rerun_on_click=True)
 
 
 def _show_result(task_id: str, owner_username: str) -> None:
@@ -311,7 +345,9 @@ def _show_result(task_id: str, owner_username: str) -> None:
 
 def show_records_page(owner_username: str) -> None:
     render_page_intro("批改记录", "集中查看自己的历史批改记录和当前处理进度。", kicker="My homework archive ✦")
-    rows = _task_rows(owner_username)
+    processing_rows = _processing_task_rows(owner_username)
+    history_rows = _history_result_rows(owner_username)
+    rows = [*processing_rows, *history_rows]
     if not rows:
         st.info("暂无批改记录。")
         return
@@ -324,13 +360,12 @@ def show_records_page(owner_username: str) -> None:
         sum(row.get("_status") in {"waiting", "running"} for row in rows),
     )
 
-    st.markdown("#### 批改记录")
-    for row in rows:
-        task_id = str(row["任务ID"])
-        with st.container(border=True):
-            st.markdown(build_task_card_html(row), unsafe_allow_html=True)
-            if st.button("查看详情", key=task_card_button_key(task_id), width="stretch"):
-                st.session_state["selected_task_id"] = task_id
+    if processing_rows:
+        _poll_processing_records(owner_username)
+
+    if history_rows:
+        st.markdown("#### 历史记录")
+        _render_task_cards(history_rows)
 
     selected_task_id = st.session_state.get("selected_task_id")
     if selected_task_id:

@@ -21,7 +21,7 @@ from result_views import _show_result, show_records_page
 from score_utils import STATUS_LABELS, _score_display
 from storage import load_result
 from task_queue import get_task_status, start_workers, submit_tasks
-from tool_pages import _show_image_processing_page, _show_paper_cut_page, _show_project_page
+from tool_pages import _show_image_processing_page, _show_paper_cut_page
 from ui_theme import (
     apply_app_theme,
     render_brand_header,
@@ -31,29 +31,63 @@ from ui_theme import (
 )
 
 
-PAGES = ["作业批改", "图片增强", "题目识别", "批改记录", "学习分析", "学习排行榜", "系统说明"]
+PAGES = ["作业批改", "图片增强", "题目识别", "批改记录", "学习分析", "学习排行榜"]
+POLL_INTERVAL = "3s"
+ACTIVE_TASK_STATUSES = {"waiting", "running"}
+
+
+def _batch_task_rows(task_ids: list[str], owner_username: str) -> tuple[list[dict[str, str]], bool]:
+    rows: list[dict[str, str]] = []
+    has_active_task = False
+    for index, task_id in enumerate(task_ids, start=1):
+        status = get_task_status(task_id, owner_username=owner_username)
+        result = load_result(task_id, owner_username=owner_username)
+        raw_status = str(status.get("status") or "unknown")
+        has_active_task = has_active_task or raw_status in ACTIVE_TASK_STATUSES
+        rows.append(
+            {
+                "index": str(index),
+                "task_id": task_id,
+                "status": STATUS_LABELS.get(raw_status, raw_status),
+                "score": _score_display(result.get("questions", [])) if result else "-",
+            }
+        )
+    return rows, has_active_task
+
+
+def _render_batch_task_rows(rows: list[dict[str, str]]) -> None:
+    st.markdown("#### 本次批量任务")
+    st.caption("后台会并发处理这些图片；状态会自动刷新，也可以进入详情查看最新结果。")
+    for row in rows:
+        task_id = row["task_id"]
+        with st.container(border=True):
+            cols = st.columns([0.8, 1.2, 1.2, 2.4, 1.2])
+            cols[0].metric("序号", row["index"])
+            cols[1].metric("状态", row["status"])
+            cols[2].metric("分数", row["score"])
+            cols[3].caption(f"任务ID：{task_id}")
+            if cols[4].button("查看详情", key=f"batch_task_view_{task_id}", width="stretch"):
+                st.session_state["selected_task_id"] = task_id
+                st.rerun()
+
+
+@st.fragment(run_every=POLL_INTERVAL)
+def _poll_batch_task_list(task_ids: list[str], owner_username: str) -> None:
+    rows, has_active_task = _batch_task_rows(task_ids, owner_username)
+    _render_batch_task_rows(rows)
+    if not has_active_task:
+        st.rerun()
 
 
 def _show_batch_task_list(task_ids: list[str], owner_username: str) -> None:
     if not task_ids:
         return
 
-    st.markdown("#### 本次批量任务")
-    st.caption("后台会并发处理这些图片；点击刷新状态或进入详情查看最新结果。")
-    for index, task_id in enumerate(task_ids, start=1):
-        status = get_task_status(task_id, owner_username=owner_username)
-        result = load_result(task_id, owner_username=owner_username)
-        status_text = STATUS_LABELS.get(status.get("status"), status.get("status", "未知"))
-        score_text = _score_display(result.get("questions", [])) if result else "-"
-        with st.container(border=True):
-            cols = st.columns([0.8, 1.2, 1.2, 2.4, 1.2])
-            cols[0].metric("序号", index)
-            cols[1].metric("状态", status_text)
-            cols[2].metric("分数", score_text)
-            cols[3].caption(f"任务ID：{task_id}")
-            if cols[4].button("查看详情", key=f"batch_task_view_{task_id}", width="stretch"):
-                st.session_state["selected_task_id"] = task_id
-                st.rerun()
+    rows, has_active_task = _batch_task_rows(task_ids, owner_username)
+    if has_active_task:
+        _poll_batch_task_list(task_ids, owner_username)
+    else:
+        _render_batch_task_rows(rows)
 
 
 def _show_homework_correction_page(owner_username: str) -> None:
@@ -114,6 +148,8 @@ def _show_homework_correction_page(owner_username: str) -> None:
 def _render_sidebar(owner_username: str) -> str:
     with st.sidebar:
         render_sidebar_identity(owner_username, _current_display_name(owner_username))
+        if st.session_state.get("main_page") not in PAGES:
+            st.session_state["main_page"] = PAGES[0]
         page = st.radio("页面", PAGES, label_visibility="collapsed", key="main_page")
         if st.button("刷新状态", width="stretch", key="sidebar_refresh"):
             st.rerun()
@@ -186,7 +222,7 @@ def main() -> None:
     elif page == "学习排行榜":
         _show_leaderboard_page(owner_username)
     else:
-        _show_project_page()
+        _show_homework_correction_page(owner_username)
 
 
 if __name__ == "__main__":
