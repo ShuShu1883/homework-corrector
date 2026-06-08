@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import streamlit as st
 
+from resource_paths import display_resource, resource_exists
 from score_utils import (
     STATUS_LABELS,
     _correct_rate,
@@ -81,9 +81,9 @@ def _write_question_detail(item: dict[str, Any], paper_cut_question: dict[str, A
     cols[1].metric("本题满分", item.get("max_score", "-"))
 
     crop_path = paper_cut_question.get("crop_path")
-    if crop_path and Path(crop_path).exists():
+    if crop_path and resource_exists(crop_path):
         with st.expander("查看本题区域", expanded=False):
-            st.image(crop_path, width="stretch")
+            st.image(display_resource(crop_path), width="stretch")
 
     _write_detail("题目理解", item.get("question_understanding"))
     st.write(f"学生答案：{item.get('student_answer', '-')}")
@@ -253,8 +253,8 @@ def _show_result(task_id: str, owner_username: str) -> None:
         with left:
             st.markdown("#### 批注结果图")
             annotated_image_path = result.get("annotated_image_path")
-            if annotated_image_path and Path(annotated_image_path).exists():
-                st.image(annotated_image_path, width="stretch")
+            if annotated_image_path and resource_exists(annotated_image_path):
+                st.image(display_resource(annotated_image_path), width="stretch")
             else:
                 st.info("暂无可显示的批注图。")
 
@@ -286,16 +286,16 @@ def _show_result(task_id: str, owner_username: str) -> None:
     with st.expander("查看原始图片与 OCR 文本", expanded=False):
         st.markdown("#### 原始作业图")
         image_preview_path = result.get("image_preview_path") or image_path
-        if image_preview_path and Path(image_preview_path).exists():
-            st.image(image_preview_path, width="stretch")
+        if image_preview_path and resource_exists(image_preview_path):
+            st.image(display_resource(image_preview_path), width="stretch")
         else:
             st.info("暂无可显示的原图。")
 
         ocr_image_path = result.get("ocr_image_path")
         ocr_preview_path = result.get("ocr_preview_path") or ocr_image_path
-        if ocr_preview_path and Path(ocr_preview_path).exists():
+        if ocr_preview_path and resource_exists(ocr_preview_path):
             st.markdown("#### 增强后识别图")
-            st.image(ocr_preview_path, width="stretch")
+            st.image(display_resource(ocr_preview_path), width="stretch")
 
         st.markdown("#### OCR 识别文本")
         st.text_area("OCR 文本", result.get("ocr_text", ""), height=160, label_visibility="collapsed")

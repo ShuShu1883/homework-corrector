@@ -7,8 +7,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from cos_storage import is_cos_enabled
 from config import UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
-from runtime_cleanup import cleanup_runtime_files
+from result_assets import delete_task_local_files, upload_result_assets
 from storage import load_result, save_result
 from time_utils import beijing_now_iso
 
@@ -76,7 +77,6 @@ def update_task_status(task_id: str, **updates: Any) -> None:
 
 def submit_task(image_file: Any, owner_username: str) -> str:
     start_workers()
-    cleanup_runtime_files(force=True)
     owner_username = str(owner_username or "").strip().lower()
     if not owner_username:
         raise ValueError("任务必须关联登录用户。")
@@ -92,6 +92,15 @@ def submit_task(image_file: Any, owner_username: str) -> str:
     )
     _task_queue.put({"task_id": task_id, "image_path": image_path, "owner_username": owner_username})
     return task_id
+
+
+def submit_tasks(image_files: list[Any], owner_username: str) -> list[str]:
+    task_ids: list[str] = []
+    for image_file in image_files:
+        if not image_file:
+            continue
+        task_ids.append(submit_task(image_file, owner_username))
+    return task_ids
 
 
 def get_task_status(task_id: str, *, owner_username: str | None = None) -> dict[str, Any]:
@@ -188,7 +197,14 @@ def _worker_loop() -> None:
         except Exception as exc:
             error_message = str(exc) or exc.__class__.__name__
             failed_result = _failed_result(task_id, image_path, owner_username, error_message)
+            if is_cos_enabled():
+                try:
+                    failed_result, _local_paths = upload_result_assets(failed_result)
+                except Exception as upload_exc:
+                    failed_result["error"] = f"{error_message}；COS 文件保存失败：{upload_exc}"
             save_result(task_id, failed_result)
+            if is_cos_enabled() and failed_result.get("storage_backend") == "cos":
+                delete_task_local_files(task_id)
             update_task_status(task_id, status="failed", error=error_message)
         finally:
             _task_queue.task_done()

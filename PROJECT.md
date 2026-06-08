@@ -12,11 +12,11 @@
 - 后台任务：Python `queue.Queue` + 后台线程池
 - OCR 模块：腾讯云题目识别 OCR
 - 智能批改：OpenAI-compatible Chat Completions API
-- 数据存储：本地 JSON 文件
+- 数据存储：本地 JSON 文件 / MySQL / 腾讯云 COS 结果 JSON
 - 账号系统：本地 JSON 文件 + Streamlit Session State
-- 文件存储：项目运行目录下的 `uploads/`、`processed/`、`cuts/`、`debug/`、`results/`、`data/` 目录，可通过 `APP_RUNTIME_DIR` 改到部署环境可写目录。
+- 文件存储：默认使用项目运行目录下的 `uploads/`、`processed/`、`cuts/`、`results/`、`data/` 目录，可通过 `APP_RUNTIME_DIR` 改到部署环境可写目录；也可以通过 `FILE_STORAGE_BACKEND=cos` 将新任务产物和结果 JSON 保存到腾讯云 COS。
 
-系统采用生产者-消费者模型。用户上传图片后，前端立即生成任务 ID 并将任务放入队列。后台 worker 线程从队列中取出任务，依次执行腾讯云切题 OCR、大模型批改和结果保存。前端通过任务 ID 查询任务状态。为适配 Streamlit Cloud 这类临时磁盘环境，应用会定期递归清理 `uploads/`、`processed/`、`cuts/`、`debug/` 下超过保留期的临时文件，避免运行产物持续堆积；`results/` 会保留。
+系统采用生产者-消费者模型。用户上传图片后，前端立即生成任务 ID 并将任务放入队列。后台 worker 线程从队列中取出任务，依次执行腾讯云切题 OCR、大模型批改和结果保存。前端通过任务 ID 查询任务状态。启用 COS 后，图片处理过程中仍会临时写入本地文件，任务成功保存到 COS 后会删除对应本地临时产物；系统不再按时间定时扫描删除运行目录。
 
 ## 模块划分
 
@@ -102,6 +102,20 @@ LLM_CONSISTENCY_RETRIES=2
 ```
 
 也可以使用 `DEEPSEEK_API_KEY` 代替 `LLM_API_KEY`。如果切换到其他 OpenAI-compatible 服务商，只需要修改 `LLM_BASE_URL` 和 `LLM_MODEL`。
+
+腾讯云 COS 存储可选配置：
+
+```text
+FILE_STORAGE_BACKEND=cos
+COS_SECRET_ID=你的腾讯云 COS SecretId
+COS_SECRET_KEY=你的腾讯云 COS SecretKey
+COS_REGION=ap-guangzhou
+COS_BUCKET=你的存储桶名-APPID
+COS_PREFIX=homework-correction
+COS_PUBLIC_BASE_URL=https://你的存储桶名-APPID.cos.ap-guangzhou.myqcloud.com
+```
+
+`COS_BUCKET` 需要使用腾讯云完整存储桶名称，例如 `examplebucket-1250000000`。当前实现按公有读 URL 展示图片；如果存储桶默认域名无法直接预览，请配置自定义域名并写入 `COS_PUBLIC_BASE_URL`。
 
 ## 报告可用表述
 

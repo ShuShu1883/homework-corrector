@@ -7,3 +7,4 @@ opencv-python-headless>=4.9
 tencentcloud-sdk-python-common>=3.0
 tencentcloud-sdk-python-ocr>=3.0
 PyMySQL>=1.1
+cos-python-sdk-v5>=1.9

@@ -542,7 +542,6 @@ def render_brand_header() -> None:
         <header class="brand-header">
             <div>
                 <div class="brand-title">中小学作业智能批改系统</div>
-                <div class="brand-copy">任务队列 · 腾讯云切题 OCR · 大模型批改</div>
             </div>
             <div class="brand-mark">✦ ✧ ✦</div>
         </header>

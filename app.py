@@ -12,14 +12,15 @@ from analysis_pages import _show_leaderboard_page, _show_learning_analysis_page
 from app_state import _current_username, _logout_session, _query_param
 from config import ensure_runtime_dirs
 from image_inputs import (
-    _select_image_input,
+    _select_image_inputs,
     _show_mobile_capture_page,
-    _uploaded_file_signature,
+    _uploaded_files_signature,
     _uploaded_preview,
 )
 from result_views import _show_result, show_records_page
-from runtime_cleanup import cleanup_runtime_files
-from task_queue import start_workers, submit_task
+from score_utils import STATUS_LABELS, _score_display
+from storage import load_result
+from task_queue import get_task_status, start_workers, submit_tasks
 from tool_pages import _show_image_processing_page, _show_paper_cut_page, _show_project_page
 from ui_theme import (
     apply_app_theme,
@@ -33,36 +34,76 @@ from ui_theme import (
 PAGES = ["作业批改", "图片增强", "题目识别", "批改记录", "学习分析", "学习排行榜", "系统说明"]
 
 
+def _show_batch_task_list(task_ids: list[str], owner_username: str) -> None:
+    if not task_ids:
+        return
+
+    st.markdown("#### 本次批量任务")
+    st.caption("后台会并发处理这些图片；点击刷新状态或进入详情查看最新结果。")
+    for index, task_id in enumerate(task_ids, start=1):
+        status = get_task_status(task_id, owner_username=owner_username)
+        result = load_result(task_id, owner_username=owner_username)
+        status_text = STATUS_LABELS.get(status.get("status"), status.get("status", "未知"))
+        score_text = _score_display(result.get("questions", [])) if result else "-"
+        with st.container(border=True):
+            cols = st.columns([0.8, 1.2, 1.2, 2.4, 1.2])
+            cols[0].metric("序号", index)
+            cols[1].metric("状态", status_text)
+            cols[2].metric("分数", score_text)
+            cols[3].caption(f"任务ID：{task_id}")
+            if cols[4].button("查看详情", key=f"batch_task_view_{task_id}", width="stretch"):
+                st.session_state["selected_task_id"] = task_id
+                st.rerun()
+
+
 def _show_homework_correction_page(owner_username: str) -> None:
     render_page_intro(
         "作业批改",
-        "提交一张作业图片，后台队列会依次完成题目识别、内容识别和智能批改。",
+        "一次提交一张或多张作业图片，后台队列会为每张图片生成独立批改报告。",
         kicker="Homework correction ✦",
     )
-    render_steps(["上传作业图片", "提交批改任务", "刷新并查看报告"])
-    uploaded_file, image_source = _select_image_input(
+    render_steps(["上传作业图片", "提交批改任务", "查看本次报告"])
+    uploaded_files, image_source = _select_image_inputs(
         key_prefix="correction",
         uploader_label="上传作业图片",
         camera_label="拍摄作业图片",
         owner_username=owner_username,
     )
-    if uploaded_file:
-        file_signature = _uploaded_file_signature(uploaded_file, source=image_source or "upload")
+    if uploaded_files:
+        file_signature = _uploaded_files_signature(uploaded_files, source=image_source or "upload")
         if st.session_state.get("correction_file_signature") != file_signature:
             st.session_state["correction_file_signature"] = file_signature
             st.session_state.pop("selected_task_id", None)
+            st.session_state.pop("selected_task_ids", None)
 
-        st.image(_uploaded_preview(uploaded_file), caption="待批改作业", width="stretch")
+        st.markdown("#### 待批改作业")
+        preview_files = uploaded_files[:6]
+        preview_cols = st.columns(min(3, len(preview_files)))
+        for index, uploaded_file in enumerate(preview_files, start=1):
+            with preview_cols[(index - 1) % len(preview_cols)]:
+                st.image(_uploaded_preview(uploaded_file), caption=f"第 {index} 张", width="stretch")
+        if len(uploaded_files) > len(preview_files):
+            st.caption(f"已选择 {len(uploaded_files)} 张图片，当前预览前 {len(preview_files)} 张。")
 
     if st.button(
-        "提交批改任务",
+        "提交批量批改任务",
         type="primary",
-        disabled=uploaded_file is None,
+        disabled=not uploaded_files,
         key="submit_correction_task",
     ):
-        task_id = submit_task(uploaded_file, owner_username)
-        st.session_state["selected_task_id"] = task_id
-        st.success(f"任务已提交：{task_id}")
+        task_ids = submit_tasks(uploaded_files, owner_username)
+        st.session_state["selected_task_ids"] = task_ids
+        st.session_state.pop("selected_task_id", None)
+        st.success(f"已提交 {len(task_ids)} 个批改任务。")
+
+    selected_task_ids = [
+        str(task_id)
+        for task_id in st.session_state.get("selected_task_ids", [])
+        if str(task_id).strip()
+    ]
+    if selected_task_ids:
+        st.divider()
+        _show_batch_task_list(selected_task_ids, owner_username)
 
     selected_task_id = st.session_state.get("selected_task_id")
     if selected_task_id:
@@ -123,7 +164,6 @@ def main() -> None:
         _show_display_name_editor(owner_username, mandatory=True)
         return
 
-    cleanup_runtime_files()
     start_workers()
 
     page = _render_sidebar(owner_username)

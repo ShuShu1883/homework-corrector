@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import streamlit as st
 
+from resource_paths import display_resource, resource_exists
 from result_views import _write_detail
 from score_utils import (
     SUBJECT_CATEGORIES,
@@ -121,8 +121,8 @@ def _write_error_book_record(record: dict[str, Any]) -> None:
         image_col, detail_col = st.columns([1, 2])
         crop_path = record.get("_crop_path")
         with image_col:
-            if crop_path and Path(str(crop_path)).exists():
-                st.image(str(crop_path), caption="题目图片", width="stretch")
+            if crop_path and resource_exists(crop_path):
+                st.image(display_resource(crop_path), caption="题目图片", width="stretch")
             else:
                 st.info("暂无题目图片")
         with detail_col:

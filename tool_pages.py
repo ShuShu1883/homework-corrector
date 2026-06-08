@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,8 @@ from image_inputs import (
 )
 from image_processing import create_preview_image, process_document_image
 from paper_cut_tencent import recognize_question_split
-from runtime_cleanup import cleanup_runtime_files
+from resource_paths import display_resource, is_http_url, resource_exists
+from result_assets import delete_local_files, upload_result_assets
 from ui_theme import render_page_intro, render_steps
 
 
@@ -44,13 +46,23 @@ def _show_image_processing_page() -> None:
         default="strong",
     )
 
+    owner_username = _current_username() or "anonymous"
+    operation_id = str(uuid.uuid4())
     original_path = _save_processing_upload(uploaded_file, source=image_source or "upload")
-    result = process_document_image(original_path, enhance_mode=selected_mode or "strong")
+    result = process_document_image(
+        original_path,
+        task_id=operation_id,
+        enhance_mode=selected_mode or "strong",
+    )
     enhanced_preview_path = (
-        create_preview_image(result["enhanced_path"], suffix="enhanced_preview")
+        create_preview_image(result["enhanced_path"], task_id=operation_id, suffix="enhanced_preview")
         if result.get("enhanced_path")
         else None
     )
+    if enhanced_preview_path:
+        result["enhanced_preview_path"] = enhanced_preview_path
+    result["task_id"] = operation_id
+    result["owner_username"] = owner_username
 
     status = result.get("status")
     if status == "success":
@@ -62,15 +74,26 @@ def _show_image_processing_page() -> None:
         return
 
     enhanced_path = result.get("enhanced_path")
-    if enhanced_path and Path(enhanced_path).exists():
+    download_data = Path(enhanced_path).read_bytes() if enhanced_path and Path(str(enhanced_path)).is_file() else None
+    download_name = Path(str(enhanced_path)).name if enhanced_path else "enhanced.png"
+    result, local_paths = upload_result_assets(result)
+    if result.get("storage_backend") == "cos":
+        delete_local_files(local_paths)
+
+    enhanced_path = result.get("enhanced_path")
+    enhanced_preview_path = result.get("enhanced_preview_path") or enhanced_preview_path
+    if enhanced_path and resource_exists(enhanced_path):
         st.markdown(f"#### {mode_labels.get(result.get('enhance_mode'), '清晰图')}")
-        st.image(enhanced_preview_path or enhanced_path, width="stretch")
-        st.download_button(
-            "下载清晰增强图",
-            data=Path(enhanced_path).read_bytes(),
-            file_name=Path(enhanced_path).name,
-            mime="image/png",
-        )
+        st.image(display_resource(enhanced_preview_path or enhanced_path), width="stretch")
+        if download_data is not None:
+            st.download_button(
+                "下载清晰增强图",
+                data=download_data,
+                file_name=download_name,
+                mime="image/png",
+            )
+        elif is_http_url(enhanced_path):
+            st.link_button("打开清晰增强图", str(enhanced_path))
 
 
 def _json_dumps_for_download(payload: dict[str, Any]) -> bytes:
@@ -112,7 +135,6 @@ def _show_paper_cut_page() -> None:
         enable_image_crop = st.toggle("腾讯云二次切边/弯曲矫正", value=False)
 
     if st.button("开始题目识别", type="primary"):
-        cleanup_runtime_files(force=True)
         st.session_state.pop("paper_cut_result", None)
         st.session_state.pop("paper_cut_original_path", None)
         st.session_state.pop("paper_cut_processed", None)
@@ -154,6 +176,10 @@ def _show_paper_cut_page() -> None:
             task_id=result["task_id"],
             suffix="api_preview",
         )
+        result["owner_username"] = _current_username() or "anonymous"
+        result, local_paths = upload_result_assets(result)
+        if result.get("storage_backend") == "cos":
+            delete_local_files(local_paths)
         st.session_state["paper_cut_result"] = result
         st.session_state["paper_cut_original_path"] = original_path
         st.session_state.pop("paper_cut_processed", None)
@@ -165,8 +191,8 @@ def _show_paper_cut_page() -> None:
 
     api_preview_path = result.get("api_preview_path") or result.get("image_path")
     st.markdown("#### 增强后识别图")
-    if api_preview_path and Path(api_preview_path).exists():
-        st.image(api_preview_path, width="stretch")
+    if api_preview_path and resource_exists(api_preview_path):
+        st.image(display_resource(api_preview_path), width="stretch")
 
     st.markdown("#### 题目识别结果")
     st.caption(f"RequestId: {result.get('request_id') or '-'}")
@@ -176,8 +202,8 @@ def _show_paper_cut_page() -> None:
         title = f"第 {item.get('question_no', item.get('subject_index'))} 题 · {title_text[:36]}"
         with st.expander(title, expanded=False):
             crop_path = item.get("crop_path")
-            if crop_path and Path(crop_path).exists():
-                st.image(crop_path, caption="题目区域", width="stretch")
+            if crop_path and resource_exists(crop_path):
+                st.image(display_resource(crop_path), caption="题目区域", width="stretch")
             st.text_area(
                 "识别文字",
                 item.get("text", ""),

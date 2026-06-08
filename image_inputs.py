@@ -74,6 +74,15 @@ def _uploaded_file_signature(uploaded_file: Any, *, source: str = "upload") -> s
     return f"{source}:{name}:{size}:{digest}"
 
 
+def _uploaded_files_signature(uploaded_files: list[Any], *, source: str = "upload") -> str:
+    signatures = [
+        _uploaded_file_signature(uploaded_file, source=source)
+        for uploaded_file in uploaded_files
+        if uploaded_file
+    ]
+    return "|".join(signatures)
+
+
 def _with_camera_filename(uploaded_file: Any, key_prefix: str) -> Any:
     data = bytes(uploaded_file.getbuffer())
     digest = hashlib.blake2b(data, digest_size=8).hexdigest()
@@ -229,6 +238,79 @@ def _select_image_input(
 
     mobile_file = _select_mobile_capture_input(key_prefix, owner_username)
     return (mobile_file, "mobile") if mobile_file else (None, None)
+
+
+def _select_image_inputs(
+    *,
+    key_prefix: str,
+    uploader_label: str,
+    camera_label: str,
+    owner_username: str,
+    mobile_client: bool | None = None,
+) -> tuple[list[Any], str | None]:
+    if mobile_client is None:
+        mobile_client = is_mobile_client()
+    if mobile_client:
+        _clear_desktop_camera_state(key_prefix)
+        _clear_mobile_capture_state(key_prefix)
+        st.caption("手机端可直接选择一张或多张图片，系统通常会提供拍照或从相册选择。")
+        uploaded_files = st.file_uploader(
+            "选择图片或拍照上传",
+            type=IMAGE_INPUT_TYPES,
+            key=f"{key_prefix}_mobile_direct_uploads",
+            accept_multiple_files=True,
+        )
+        return (list(uploaded_files), "upload") if uploaded_files else ([], None)
+
+    source_key = f"{key_prefix}_image_source"
+    source = st.segmented_control(
+        "图片来源",
+        ["上传图片", "电脑摄像头", "手机拍照"],
+        key=source_key,
+        default="上传图片",
+        width="stretch",
+    )
+    previous_source_key = f"{key_prefix}_previous_image_source"
+    previous_source = st.session_state.get(previous_source_key)
+    if previous_source != source:
+        st.session_state[previous_source_key] = source
+        if source == "上传图片":
+            _clear_desktop_camera_state(key_prefix)
+            _clear_mobile_capture_state(key_prefix)
+        elif source == "电脑摄像头":
+            _clear_mobile_capture_state(key_prefix)
+        elif source == "手机拍照":
+            _clear_desktop_camera_state(key_prefix)
+
+    if source == "上传图片":
+        uploaded_files = st.file_uploader(
+            uploader_label,
+            type=IMAGE_INPUT_TYPES,
+            key=f"{key_prefix}_uploader_multi",
+            accept_multiple_files=True,
+        )
+        return (list(uploaded_files), "upload") if uploaded_files else ([], None)
+
+    if source == "电脑摄像头":
+        st.caption("浏览器会请求当前电脑的摄像头权限；线上访问通常需要 HTTPS。")
+        camera_open_key = f"{key_prefix}_camera_open"
+        if not st.session_state.get(camera_open_key):
+            st.info("点击下方按钮后才会打开摄像头区域。Streamlit 不能直接弹出系统相机，需要先渲染摄像头组件。")
+            if st.button("打开电脑摄像头", key=f"{key_prefix}_camera_open_button", type="primary"):
+                st.session_state[camera_open_key] = True
+                st.rerun()
+            return [], None
+
+        if st.button("关闭摄像头", key=f"{key_prefix}_camera_close_button"):
+            _clear_desktop_camera_state(key_prefix)
+            st.rerun()
+        camera_file = st.camera_input(camera_label, key=f"{key_prefix}_camera")
+        if camera_file:
+            return [_with_camera_filename(camera_file, key_prefix)], "camera"
+        return [], None
+
+    mobile_file = _select_mobile_capture_input(key_prefix, owner_username)
+    return ([mobile_file], "mobile") if mobile_file else ([], None)
 
 
 def _show_mobile_capture_page(token: str) -> None:

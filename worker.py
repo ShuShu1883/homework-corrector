@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from cos_storage import is_cos_enabled
 from image_processing import create_annotated_correction_image, create_preview_image, process_document_image
 from llm_corrector import correct_homework
 from paper_cut_tencent import recognize_question_split
+from result_assets import delete_task_local_files, upload_result_assets
 from storage import save_result
 from time_utils import beijing_now_iso
 
@@ -82,5 +84,8 @@ def process_homework(task_id: str, image_path: str, owner_username: str) -> dict
         "finished_at": beijing_now_iso(),
         "ocr_raw": ocr_result.get("raw"),
     }
+    result, _local_paths = upload_result_assets(result)
     save_result(task_id, result)
+    if is_cos_enabled() and result.get("storage_backend") == "cos":
+        delete_task_local_files(task_id)
     return result
