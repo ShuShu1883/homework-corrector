@@ -1,12 +1,12 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
 import streamlit as st
 
-from resource_paths import display_resource, resource_exists
-from result_views import _write_detail
-from score_utils import (
+from homework_corrector.core.resource_paths import display_resource, resource_exists
+from homework_corrector.ui.result_views import _write_detail
+from homework_corrector.processing.score_utils import (
     SUBJECT_CATEGORIES,
     _finished_results,
     _leaderboard_rows,
@@ -16,7 +16,7 @@ from score_utils import (
     _wrong_question_groups_by_subject,
     _wrong_question_records,
 )
-from ui_theme import build_leaderboard_card_html, render_page_intro
+from homework_corrector.ui.ui_theme import build_leaderboard_card_html, render_page_intro
 
 
 def _show_score_trend_tab(owner_username: str) -> None:

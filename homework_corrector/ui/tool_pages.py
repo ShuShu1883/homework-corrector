@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import uuid
 from pathlib import Path
@@ -6,18 +6,18 @@ from typing import Any
 
 import streamlit as st
 
-from app_state import _current_username
-from image_inputs import (
+from homework_corrector.core.app_state import _current_username
+from homework_corrector.ui.image_inputs import (
     _save_processing_upload,
     _select_image_input,
     _uploaded_file_signature,
     _uploaded_preview,
 )
-from image_processing import create_preview_image, process_document_image
-from paper_cut_tencent import recognize_question_split
-from resource_paths import display_resource, is_http_url, resource_exists
-from result_assets import delete_local_files, upload_result_assets
-from ui_theme import render_page_intro, render_steps
+from homework_corrector.processing.image_processing import create_preview_image, process_document_image
+from homework_corrector.processing.paper_cut_tencent import recognize_question_split
+from homework_corrector.core.resource_paths import display_resource, is_http_url, resource_exists
+from homework_corrector.storage.result_assets import delete_local_files, upload_result_assets
+from homework_corrector.ui.ui_theme import render_page_intro, render_steps
 
 
 def _show_image_processing_page() -> None:

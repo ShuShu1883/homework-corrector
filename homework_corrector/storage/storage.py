@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from cos_storage import (
+from homework_corrector.storage.cos_storage import (
     CosStorageError,
     delete_keys,
     delete_prefix,
@@ -19,9 +19,9 @@ from cos_storage import (
     task_prefix as cos_task_prefix,
     upload_json,
 )
-from config import RESULT_DIR, ensure_runtime_dirs
-from db import DatabaseError, execute, fetch_all, fetch_one, initialize_database, is_mysql_enabled
-from time_utils import beijing_now_iso
+from homework_corrector.core.config import RESULT_DIR, ensure_runtime_dirs
+from homework_corrector.storage.db import DatabaseError, execute, fetch_all, fetch_one, initialize_database, is_mysql_enabled
+from homework_corrector.core.time_utils import beijing_now_iso
 
 
 logger = logging.getLogger(__name__)

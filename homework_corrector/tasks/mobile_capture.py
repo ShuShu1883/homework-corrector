@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import secrets
@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from config import DATA_DIR, ensure_runtime_dirs
-from time_utils import beijing_now
+from homework_corrector.core.config import DATA_DIR, ensure_runtime_dirs
+from homework_corrector.core.time_utils import beijing_now
 
 
 CAPTURE_TTL_MINUTES = 10

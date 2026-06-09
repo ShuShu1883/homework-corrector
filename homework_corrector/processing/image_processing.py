@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import uuid
 from pathlib import Path
@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from config import PROCESSED_DIR, ensure_runtime_dirs
+from homework_corrector.core.config import PROCESSED_DIR, ensure_runtime_dirs
 
 
 MAX_DETECT_SIDE = 1000

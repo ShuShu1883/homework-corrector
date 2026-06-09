@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
 import streamlit as st
 
-from resource_paths import display_resource, resource_exists
-from score_utils import (
+from homework_corrector.core.resource_paths import display_resource, resource_exists
+from homework_corrector.processing.score_utils import (
     STATUS_LABELS,
     _correct_rate,
     _paper_cut_question_by_no,
@@ -14,9 +14,9 @@ from score_utils import (
     _result_subject,
     _score_display,
 )
-from storage import list_results, load_result
-from task_queue import get_task_status, list_tasks
-from ui_theme import build_task_card_html, render_page_intro, task_card_button_key
+from homework_corrector.storage.storage import list_results, load_result
+from homework_corrector.tasks.task_queue import get_task_status, list_tasks
+from homework_corrector.ui.ui_theme import build_task_card_html, render_page_intro, task_card_button_key
 
 
 POLL_INTERVAL = "3s"

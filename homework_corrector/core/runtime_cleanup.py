@@ -1,9 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import time
 from pathlib import Path
 
-from config import CUT_DIR, PROCESSED_DIR, UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
+from homework_corrector.core.config import CUT_DIR, PROCESSED_DIR, UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
 
 
 TRANSIENT_DIRS = (UPLOAD_DIR, PROCESSED_DIR, CUT_DIR)

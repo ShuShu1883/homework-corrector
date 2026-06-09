@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from config import get_int_setting, get_setting
+from homework_corrector.core.config import get_int_setting, get_setting
 
 
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com"

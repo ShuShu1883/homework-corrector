@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import json
@@ -8,7 +8,7 @@ from typing import Any
 
 from PIL import Image, ImageOps
 
-from config import CUT_DIR, PROCESSED_DIR, ensure_runtime_dirs, get_int_setting, get_setting
+from homework_corrector.core.config import CUT_DIR, PROCESSED_DIR, ensure_runtime_dirs, get_int_setting, get_setting
 
 
 MAX_IMAGE_BASE64_BYTES = 10 * 1024 * 1024

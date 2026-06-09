@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from config import CUT_DIR, PROCESSED_DIR, UPLOAD_DIR
-from cos_storage import is_cos_enabled, task_file_key, task_prefix, upload_file
-from resource_paths import is_http_url, is_local_file, safe_unlink
+from homework_corrector.core.config import CUT_DIR, PROCESSED_DIR, UPLOAD_DIR
+from homework_corrector.storage.cos_storage import is_cos_enabled, task_file_key, task_prefix, upload_file
+from homework_corrector.core.resource_paths import is_http_url, is_local_file, safe_unlink
 
 
 TOP_LEVEL_PATH_KEYS = (

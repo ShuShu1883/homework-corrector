@@ -1,15 +1,15 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from cos_storage import is_cos_enabled
-from image_processing import create_annotated_correction_image, create_preview_image, process_document_image
-from llm_corrector import correct_homework
-from paper_cut_tencent import recognize_question_split
-from result_assets import delete_task_local_files, upload_result_assets
-from storage import save_result
-from time_utils import beijing_now_iso
+from homework_corrector.storage.cos_storage import is_cos_enabled
+from homework_corrector.processing.image_processing import create_annotated_correction_image, create_preview_image, process_document_image
+from homework_corrector.processing.llm_corrector import correct_homework
+from homework_corrector.processing.paper_cut_tencent import recognize_question_split
+from homework_corrector.storage.result_assets import delete_task_local_files, upload_result_assets
+from homework_corrector.storage.storage import save_result
+from homework_corrector.core.time_utils import beijing_now_iso
 
 
 def _prepare_ocr_image(task_id: str, image_path: str) -> dict[str, Any]:

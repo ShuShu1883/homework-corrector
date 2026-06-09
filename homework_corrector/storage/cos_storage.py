@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import mimetypes
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote, unquote, urlparse
 
-from config import get_setting
+from homework_corrector.core.config import get_setting
 
 
 DEFAULT_COS_PREFIX = "homework-correction"

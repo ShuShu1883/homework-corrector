@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import uuid
@@ -11,17 +11,17 @@ from PIL import Image, ImageOps
 import qrcode
 import streamlit as st
 
-from app_state import _current_username, _query_param, is_mobile_client
-from config import UPLOAD_DIR, ensure_runtime_dirs
-from mobile_capture import (
+from homework_corrector.core.app_state import _current_username, _query_param, is_mobile_client
+from homework_corrector.core.config import UPLOAD_DIR, ensure_runtime_dirs
+from homework_corrector.tasks.mobile_capture import (
     MobileCaptureError,
     create_mobile_capture,
     get_mobile_capture_image,
     get_mobile_capture_status,
     save_mobile_capture_upload,
 )
-from score_utils import IMAGE_INPUT_TYPES
-from ui_theme import render_page_intro
+from homework_corrector.processing.score_utils import IMAGE_INPUT_TYPES
+from homework_corrector.ui.ui_theme import render_page_intro
 
 
 class _NamedImageInput:

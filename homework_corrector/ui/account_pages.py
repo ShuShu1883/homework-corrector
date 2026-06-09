@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
 
-from auth import (
+from homework_corrector.auth.auth import (
     AuthValidationError,
     authenticate_user,
     delete_user,
@@ -13,10 +13,10 @@ from auth import (
     register_user,
     update_display_name,
 )
-from config import CUT_DIR, PROCESSED_DIR, UPLOAD_DIR
-from storage import delete_results
-from time_utils import beijing_now_iso
-from ui_theme import render_auth_hero, render_login_heading, render_page_intro
+from homework_corrector.core.config import CUT_DIR, PROCESSED_DIR, UPLOAD_DIR
+from homework_corrector.storage.storage import delete_results
+from homework_corrector.core.time_utils import beijing_now_iso
+from homework_corrector.ui.ui_theme import render_auth_hero, render_login_heading, render_page_intro
 
 
 RESULT_FILE_PATH_KEYS = (

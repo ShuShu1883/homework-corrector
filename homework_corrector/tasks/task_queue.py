@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import queue
 import shutil
@@ -7,11 +7,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from cos_storage import is_cos_enabled
-from config import UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
-from result_assets import delete_task_local_files, upload_result_assets
-from storage import load_result, save_result
-from time_utils import beijing_now_iso
+from homework_corrector.storage.cos_storage import is_cos_enabled
+from homework_corrector.core.config import UPLOAD_DIR, ensure_runtime_dirs, get_int_setting
+from homework_corrector.storage.result_assets import delete_task_local_files, upload_result_assets
+from homework_corrector.storage.storage import load_result, save_result
+from homework_corrector.core.time_utils import beijing_now_iso
 
 
 _task_queue: queue.Queue[dict[str, str]] = queue.Queue()
@@ -177,7 +177,7 @@ def start_workers(max_workers: int | None = None) -> None:
 
 
 def _worker_loop() -> None:
-    from worker import process_homework
+    from homework_corrector.tasks.worker import process_homework
 
     while True:
         task = _task_queue.get()

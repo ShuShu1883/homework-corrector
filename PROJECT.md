@@ -20,15 +20,14 @@
 
 ## 模块划分
 
-- `app.py`：Streamlit 页面入口，负责上传图片、提交任务、展示状态和结果。
-- `task_queue.py`：任务队列、任务状态管理、后台 worker 启动控制。
-- `worker.py`：单个作业任务的完整处理流程。
-- `image_processing.py`：图片增强模块，负责文档边界检测、透视校正和文字增强。
-- `paper_cut_tencent.py`：腾讯云题目识别 OCR 模块，调用 `QuestionSplitOCR` 并按返回坐标裁出题目小图。
-- `llm_corrector.py`：大模型批改封装，对外只暴露 `correct_homework`。
-- `storage.py`：批改结果 JSON 保存和读取。
-- `config.py`：环境变量、`.env`、Streamlit Secrets 配置读取。
-- `auth.py`：简化账号注册、登录校验和本地 JSON 存储。
+- `app.py`：Streamlit 根入口，仅负责调用 `homework_corrector.app_main.main()`，保持 `streamlit run app.py` 和 Streamlit Cloud 入口兼容。
+- `homework_corrector/app_main.py`：应用主流程，负责页面路由、登录态判断、任务提交和结果展示调度。
+- `homework_corrector/core/`：配置读取、Session State、时间工具、资源路径和运行目录清理等基础工具。
+- `homework_corrector/ui/`：Streamlit 页面、上传输入、结果视图、分析页面和主题样式。
+- `homework_corrector/auth/`：简化账号注册、登录校验和本地 JSON 存储。
+- `homework_corrector/processing/`：图片增强、腾讯云题目识别 OCR、大模型批改和分数统计。
+- `homework_corrector/storage/`：本地 JSON、MySQL、腾讯云 COS 和结果附件持久化。
+- `homework_corrector/tasks/`：任务队列、后台 worker 流程和手机拍照上传临时令牌。
 
 ## 登录系统
 

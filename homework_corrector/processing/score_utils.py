@@ -1,9 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
-from auth import get_display_name
-from storage import list_results
+from homework_corrector.auth.auth import get_display_name
+from homework_corrector.storage.storage import list_results
 
 
 STATUS_LABELS = {

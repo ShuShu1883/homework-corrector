@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import threading
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from config import get_int_setting, get_setting
+from homework_corrector.core.config import get_int_setting, get_setting
 
 
 logger = logging.getLogger(__name__)

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -7,9 +7,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from config import DATA_DIR, ensure_runtime_dirs
-from db import DatabaseError, execute, fetch_one, initialize_database, is_mysql_enabled
-from time_utils import beijing_now, beijing_now_iso
+from homework_corrector.core.config import DATA_DIR, ensure_runtime_dirs
+from homework_corrector.storage.db import DatabaseError, execute, fetch_one, initialize_database, is_mysql_enabled
+from homework_corrector.core.time_utils import beijing_now, beijing_now_iso
 
 
 USERS_PATH = DATA_DIR / "users.json"
