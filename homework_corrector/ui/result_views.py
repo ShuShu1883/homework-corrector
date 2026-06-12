@@ -240,8 +240,15 @@ def _poll_processing_records(owner_username: str) -> None:
 
 
 def _show_result(task_id: str, owner_username: str) -> None:
-    status = get_task_status(task_id, owner_username=owner_username)
     result = load_result(task_id, owner_username=owner_username)
+    status = get_task_status(task_id, owner_username=owner_username) if not result else {
+        "task_id": task_id,
+        "status": result.get("status", "unknown"),
+        "score": result.get("score"),
+        "error": result.get("error"),
+        "image_path": result.get("image_path"),
+        "result_saved": True,
+    }
 
     if status.get("status") == "unknown" and not result:
         st.error("任务不存在，或你无权查看该任务。")

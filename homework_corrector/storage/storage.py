@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -25,10 +26,58 @@ from homework_corrector.core.time_utils import beijing_now_iso
 
 
 logger = logging.getLogger(__name__)
+_result_cache_lock: Any = None
+_result_cache: dict[tuple[str, str | None, bool, bool], tuple[float, dict[str, Any] | None]] = {}
+_RESULT_CACHE_TTL_SECONDS = 300
+
+
+def _cache_lock() -> Any:
+    global _result_cache_lock
+    if _result_cache_lock is None:
+        import threading
+
+        _result_cache_lock = threading.RLock()
+    return _result_cache_lock
 
 
 def _result_path(task_id: str) -> Path:
     return RESULT_DIR / f"{task_id}.json"
+
+
+def _cache_key(task_id: str, owner_username: str | None) -> tuple[str, str | None, bool, bool]:
+    owner_key = str(owner_username).strip().lower() if owner_username is not None else None
+    return (str(task_id), owner_key, is_cos_enabled(), is_mysql_enabled())
+
+
+def _get_cached_result(task_id: str, owner_username: str | None) -> dict[str, Any] | None:
+    key = _cache_key(task_id, owner_username)
+    now = time.monotonic()
+    with _cache_lock():
+        cached = _result_cache.get(key)
+        if not cached:
+            return None
+        cached_at, value = cached
+        if now - cached_at > _RESULT_CACHE_TTL_SECONDS:
+            _result_cache.pop(key, None)
+            return None
+        return dict(value) if isinstance(value, dict) else value
+
+
+def _set_cached_result(task_id: str, owner_username: str | None, result: dict[str, Any] | None) -> None:
+    if result is None:
+        return
+    with _cache_lock():
+        _result_cache[_cache_key(task_id, owner_username)] = (time.monotonic(), dict(result))
+
+
+def _clear_result_cache(task_id: str, owner_username: str | None = None) -> None:
+    with _cache_lock():
+        if owner_username is None:
+            for key in list(_result_cache):
+                if key[0] == str(task_id):
+                    _result_cache.pop(key, None)
+            return
+        _result_cache.pop(_cache_key(task_id, owner_username), None)
 
 
 def _log_mysql_fallback(action: str, exc: Exception) -> None:
@@ -261,11 +310,14 @@ def _save_result_cos(task_id: str, result: dict[str, Any]) -> dict[str, Any]:
 
 
 def save_result(task_id: str, result: dict[str, Any]) -> None:
+    owner_username = str(result.get("owner_username") or "").strip().lower() or None
+    _clear_result_cache(task_id, owner_username)
     if is_cos_enabled():
         try:
             payload = _save_result_cos(task_id, result)
             if is_mysql_enabled():
                 _save_result_mysql(task_id, payload, include_payload=False)
+            _set_cached_result(task_id, owner_username, payload)
             return
         except CosStorageError as exc:
             if result.get("status") == "failed":
@@ -279,19 +331,23 @@ def save_result(task_id: str, result: dict[str, Any]) -> None:
                         "error": result.get("error") or str(exc),
                     }
                     _save_result_mysql(task_id, failed_payload, include_payload=True)
+                    _set_cached_result(task_id, owner_username, failed_payload)
                     return
                 _save_result_json(task_id, result)
+                _set_cached_result(task_id, owner_username, result)
                 return
             raise
 
     if is_mysql_enabled():
         try:
             _save_result_mysql(task_id, result, include_payload=True)
+            _set_cached_result(task_id, owner_username, result)
             return
         except DatabaseError as exc:
             _log_mysql_fallback("save", exc)
 
     _save_result_json(task_id, result)
+    _set_cached_result(task_id, owner_username, result)
 
 
 def _load_result_json(task_id: str, *, owner_username: str | None = None) -> dict[str, Any] | None:
@@ -400,29 +456,41 @@ def _load_result_cos_from_index(task_id: str, *, owner_username: str | None = No
 
 
 def load_result(task_id: str, *, owner_username: str | None = None) -> dict[str, Any] | None:
+    cached_result = _get_cached_result(task_id, owner_username)
+    if cached_result is not None:
+        return cached_result
+
     if is_cos_enabled():
         if is_mysql_enabled():
             try:
                 result = _load_result_cos_from_index(task_id, owner_username=owner_username)
                 if result:
+                    _set_cached_result(task_id, owner_username, result)
                     return result
             except (DatabaseError, ValueError, json.JSONDecodeError) as exc:
                 _log_mysql_fallback("load index", exc)
         try:
             result = _load_result_cos(task_id, owner_username=owner_username)
             if result:
+                _set_cached_result(task_id, owner_username, result)
                 return result
         except CosStorageError as exc:
             _log_cos_fallback("load", exc)
-        return _load_result_json(task_id, owner_username=owner_username)
+        result = _load_result_json(task_id, owner_username=owner_username)
+        _set_cached_result(task_id, owner_username, result)
+        return result
 
     if is_mysql_enabled():
         try:
-            return _load_result_mysql(task_id, owner_username=owner_username)
+            result = _load_result_mysql(task_id, owner_username=owner_username)
+            _set_cached_result(task_id, owner_username, result)
+            return result
         except (DatabaseError, ValueError, json.JSONDecodeError) as exc:
             _log_mysql_fallback("load", exc)
 
-    return _load_result_json(task_id, owner_username=owner_username)
+    result = _load_result_json(task_id, owner_username=owner_username)
+    _set_cached_result(task_id, owner_username, result)
+    return result
 
 
 def _list_results_json(*, owner_username: str | None = None) -> list[dict[str, Any]]:
@@ -440,7 +508,7 @@ def _list_results_mysql(*, owner_username: str | None = None) -> list[dict[str, 
     if owner_username is None:
         rows = fetch_all(
             """
-            SELECT task_id, owner_username, status, saved_at, finished_at, payload,
+            SELECT task_id, owner_username, status, saved_at, finished_at,
                    subject, score, max_score, score_text, question_count,
                    storage_backend, cos_result_key, cos_prefix, error_message
             FROM results
@@ -450,7 +518,7 @@ def _list_results_mysql(*, owner_username: str | None = None) -> list[dict[str, 
     else:
         rows = fetch_all(
             """
-            SELECT task_id, owner_username, status, saved_at, finished_at, payload,
+            SELECT task_id, owner_username, status, saved_at, finished_at,
                    subject, score, max_score, score_text, question_count,
                    storage_backend, cos_result_key, cos_prefix, error_message
             FROM results

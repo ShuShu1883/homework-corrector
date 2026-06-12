@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from homework_corrector.auth.auth import get_display_name
+from homework_corrector.auth.auth import get_display_names
 from homework_corrector.storage.storage import list_results, load_result
 
 
@@ -71,6 +71,14 @@ def _score_rate_value(questions: list[dict[str, Any]]) -> float | None:
         return None
     total_score, total_max_score = totals
     return total_score / total_max_score
+
+
+def _result_score_totals(result: dict[str, Any]) -> tuple[float, float] | None:
+    score = _score_number(result.get("score"))
+    max_score = _score_number(result.get("max_score"))
+    if score is not None and max_score is not None and max_score > 0:
+        return score, max_score
+    return _score_totals(result.get("questions", []))
 
 
 def _finished_results(owner_username: str | None = None) -> list[dict[str, Any]]:
@@ -178,9 +186,11 @@ def _wrong_question_groups_by_subject(results: list[dict[str, Any]]) -> dict[str
 
 def _leaderboard_rows(limit: int = 5) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     by_user: dict[str, dict[str, Any]] = {}
-    for result in _finished_results():
+    for result in list_results():
+        if result.get("status") != "finished":
+            continue
         username = str(result.get("owner_username") or "").strip().lower()
-        totals = _score_totals(result.get("questions", []))
+        totals = _result_score_totals(result)
         if not username or totals is None:
             continue
         score, max_score = totals
@@ -188,10 +198,11 @@ def _leaderboard_rows(limit: int = 5) -> tuple[list[dict[str, Any]], dict[str, d
         by_user[username]["rates"].append(score / max_score)
         by_user[username]["total_score"] += score
 
+    display_names = get_display_names(set(by_user))
     rows = [
         {
             "username": username,
-            "display_name": (get_display_name(username) or username),
+            "display_name": (display_names.get(username) or username),
             "average_rate": sum(data["rates"]) / len(data["rates"]),
             "average_rate_label": f"{sum(data['rates']) / len(data['rates']):.0%}",
             "task_count": len(data["rates"]),

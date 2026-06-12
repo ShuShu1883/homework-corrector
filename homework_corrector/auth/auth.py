@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from homework_corrector.core.config import DATA_DIR, ensure_runtime_dirs
-from homework_corrector.storage.db import DatabaseError, execute, fetch_one, initialize_database, is_mysql_enabled
+from homework_corrector.storage.db import DatabaseError, execute, fetch_all, fetch_one, initialize_database, is_mysql_enabled
 from homework_corrector.core.time_utils import beijing_now, beijing_now_iso
 
 
@@ -210,6 +210,45 @@ def get_display_name(username: str) -> str:
     if not user:
         return str(username or "").strip().lower()
     return str(user.get("display_name") or user.get("username") or "").strip()
+
+
+def get_display_names(usernames: list[str] | set[str]) -> dict[str, str]:
+    normalized_names: list[str] = []
+    for username in usernames:
+        try:
+            normalized = normalize_username(str(username))
+        except AuthValidationError:
+            continue
+        if normalized not in normalized_names:
+            normalized_names.append(normalized)
+
+    if not normalized_names:
+        return {}
+
+    if is_mysql_enabled():
+        try:
+            initialize_database()
+            placeholders = ", ".join(["%s"] * len(normalized_names))
+            rows = fetch_all(
+                f"SELECT username, display_name FROM users WHERE username IN ({placeholders})",
+                tuple(normalized_names),
+            )
+            result = {
+                str(row.get("username") or "").strip().lower(): str(
+                    row.get("display_name") or row.get("username") or ""
+                ).strip()
+                for row in rows
+            }
+            return {username: result.get(username) or username for username in normalized_names}
+        except DatabaseError as exc:
+            _log_mysql_fallback("display_names", exc)
+
+    with _users_lock:
+        users = {_with_display_name(item)["username"]: _with_display_name(item) for item in _load_users()}
+    return {
+        username: str(users.get(username, {}).get("display_name") or username).strip()
+        for username in normalized_names
+    }
 
 
 def update_display_name(username: str, display_name: str) -> str:
