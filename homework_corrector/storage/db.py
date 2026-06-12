@@ -108,12 +108,70 @@ def initialize_database() -> None:
                 saved_at DATETIME NULL,
                 finished_at DATETIME NULL,
                 payload JSON NOT NULL,
-                INDEX idx_results_owner_saved_at (owner_username, saved_at)
+                subject VARCHAR(32) NULL,
+                score DOUBLE NULL,
+                max_score DOUBLE NULL,
+                score_text VARCHAR(64) NULL,
+                question_count INT NULL,
+                storage_backend VARCHAR(32) NULL,
+                cos_result_key VARCHAR(512) NULL,
+                cos_prefix VARCHAR(512) NULL,
+                error_message TEXT NULL,
+                INDEX idx_results_owner_saved_at (owner_username, saved_at),
+                INDEX idx_results_owner_status_saved_at (owner_username, status, saved_at)
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
             """
         )
+        existing_columns = _table_columns("results")
+        _ensure_column("results", "subject", "VARCHAR(32) NULL AFTER payload", existing_columns)
+        _ensure_column("results", "score", "DOUBLE NULL AFTER subject", existing_columns)
+        _ensure_column("results", "max_score", "DOUBLE NULL AFTER score", existing_columns)
+        _ensure_column("results", "score_text", "VARCHAR(64) NULL AFTER max_score", existing_columns)
+        _ensure_column("results", "question_count", "INT NULL AFTER score_text", existing_columns)
+        _ensure_column("results", "storage_backend", "VARCHAR(32) NULL AFTER question_count", existing_columns)
+        _ensure_column("results", "cos_result_key", "VARCHAR(512) NULL AFTER storage_backend", existing_columns)
+        _ensure_column("results", "cos_prefix", "VARCHAR(512) NULL AFTER cos_result_key", existing_columns)
+        _ensure_column("results", "error_message", "TEXT NULL AFTER cos_prefix", existing_columns)
+        _ensure_index(
+            "results",
+            "idx_results_owner_status_saved_at",
+            "(owner_username, status, saved_at)",
+            _table_indexes("results"),
+        )
         _initialized = True
         logger.info("MySQL storage initialized.")
+
+
+def _table_columns(table: str) -> set[str]:
+    return {str(row.get("Field")) for row in fetch_all(f"SHOW COLUMNS FROM {table}")}
+
+
+def _table_indexes(table: str) -> set[str]:
+    return {str(row.get("Key_name")) for row in fetch_all(f"SHOW INDEX FROM {table}")}
+
+
+def _ensure_column(table: str, column: str, definition: str, existing_columns: set[str]) -> None:
+    if column in existing_columns:
+        return
+    try:
+        execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        existing_columns.add(column)
+    except DatabaseError as exc:
+        message = str(exc)
+        if "Duplicate column" not in message and "already exists" not in message:
+            raise
+
+
+def _ensure_index(table: str, index_name: str, definition: str, existing_indexes: set[str]) -> None:
+    if index_name in existing_indexes:
+        return
+    try:
+        execute(f"ALTER TABLE {table} ADD INDEX {index_name} {definition}")
+        existing_indexes.add(index_name)
+    except DatabaseError as exc:
+        message = str(exc)
+        if "Duplicate key name" not in message and "already exists" not in message:
+            raise
 
 
 def execute(sql: str, args: Any | None = None) -> None:

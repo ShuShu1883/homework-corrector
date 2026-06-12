@@ -184,7 +184,7 @@ def _task_status_row(item: dict[str, Any], owner_username: str) -> dict[str, Any
         "任务ID": task_id,
         "状态": STATUS_LABELS.get(raw_status, raw_status),
         "_status": raw_status,
-        "分数": _score_display(result.get("questions", [])) if result else "-",
+        "分数": result.get("score_text") or _score_display(result.get("questions", [])) if result else "-",
         "创建时间": item.get("created_at", "-"),
         "更新时间": status.get("updated_at", item.get("updated_at", "-")),
     }
@@ -210,7 +210,7 @@ def _history_result_rows(owner_username: str) -> list[dict[str, Any]]:
                 "任务ID": task_id,
                 "状态": STATUS_LABELS.get(result.get("status"), result.get("status")),
                 "_status": result.get("status"),
-                "分数": _score_display(result.get("questions", [])),
+                "分数": result.get("score_text") or _score_display(result.get("questions", [])),
                 "创建时间": result.get("saved_at", "-"),
                 "更新时间": result.get("finished_at", result.get("saved_at", "-")),
             }
@@ -257,6 +257,10 @@ def _show_result(task_id: str, owner_username: str) -> None:
     col_b.metric("总分", _score_display(result.get("questions", [])) if result else "-")
     col_c.metric("正确率", _correct_rate(result.get("questions", [])) if result else "-")
     col_d.metric("识别题数", question_count)
+
+    if result and result.get("_detail_unavailable"):
+        st.error(result.get("error") or "完整报告暂不可用，请稍后重试。")
+        return
 
     error_message = _result_error_message(status, result)
     image_path = (result.get("image_path") if result else None) or status.get("image_path")

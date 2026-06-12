@@ -3,7 +3,7 @@
 from typing import Any
 
 from homework_corrector.auth.auth import get_display_name
-from homework_corrector.storage.storage import list_results
+from homework_corrector.storage.storage import list_results, load_result
 
 
 STATUS_LABELS = {
@@ -74,11 +74,20 @@ def _score_rate_value(questions: list[dict[str, Any]]) -> float | None:
 
 
 def _finished_results(owner_username: str | None = None) -> list[dict[str, Any]]:
-    return [
-        item
-        for item in list_results(owner_username=owner_username)
-        if item.get("status") == "finished"
-    ]
+    results: list[dict[str, Any]] = []
+    for item in list_results(owner_username=owner_username):
+        if item.get("status") != "finished":
+            continue
+        if item.get("questions"):
+            results.append(item)
+            continue
+        task_id = str(item.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        detail = load_result(task_id, owner_username=owner_username)
+        if detail and detail.get("status") == "finished" and detail.get("questions"):
+            results.append(detail)
+    return results
 
 
 def _result_subject(result: dict[str, Any]) -> str:
